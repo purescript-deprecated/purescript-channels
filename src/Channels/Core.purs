@@ -60,14 +60,14 @@ module Channels.Core where
   awaitDown q f = await q g
     where 
       g (Left a)  = f a
-      g (Right b) = emitDown q b
+      g (Right b) = emitUp q b
 
   -- | Using the specified terminator, awaits an upstream value and passes 
   -- | through all downstream values.
   awaitUp :: forall a b b' f r. (Applicative f) => Effectable f r -> (b -> Channel a a b b' f r) -> Channel a a b b' f r
   awaitUp q f = await q g
     where 
-      g (Left a)  = emitUp q a 
+      g (Left a)  = emitDown q a 
       g (Right b) = f b
 
   -- | Using the specified terminator, emits an upstream or downstream value.

@@ -15,7 +15,7 @@
       Downstream :: Channel a a' b b f r -> Downstream b f r a a'
 
     data Effectable f a where
-      EffPure :: a -> Effectable f a
+      EffP :: a -> Effectable f a
       EffX :: f a -> Effectable f a
       EffZ :: Lazy (Effectable f a) -> Effectable f a
 
@@ -80,17 +80,15 @@
 
     emit :: forall a a' b b' f r. (Applicative f) => Effectable f r -> Either a' b' -> Channel a a' b b' f r
 
-    emitDown :: forall a a' b b' f r. (Applicative f) => Effectable f r -> b' -> Channel a a' b b' f r
+    emitDown :: forall a a' b b' f r. (Applicative f) => Effectable f r -> a' -> Channel a a' b b' f r
 
-    emitUp :: forall a a' b b' f r. (Applicative f) => Effectable f r -> a' -> Channel a a' b b' f r
+    emitUp :: forall a a' b b' f r. (Applicative f) => Effectable f r -> b' -> Channel a a' b b' f r
 
     finalizer :: forall a a' b b' f r x. (Applicative f) => f x -> Channel a a' b b' f r -> Channel a a' b b' f r
 
     runEffectable :: forall f a. (Applicative f) => Effectable f a -> f a
 
     stack :: forall a a' a'' b b' b'' f r r'. (Applicative f) => Channel a a' b' b'' f r -> Channel a' a'' b b' f r' -> Channel a a'' b b'' f (Tuple r r')
-
-    strictEffectable :: forall f a. (Functor f) => Effectable f a -> Effectable f a
 
     terminate :: forall a a' b b' f r. (Applicative f) => Channel a a' b b' f r -> Effectable f r
 
