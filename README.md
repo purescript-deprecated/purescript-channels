@@ -72,23 +72,29 @@
 
 ### Values
 
-    await :: forall a a' b b' f r. (Either a b -> Channel a a' b b' f r) -> Effectable f r -> Channel a a' b b' f r
+    await :: forall a a' b b' f r. Effectable f r -> (Either a b -> Channel a a' b b' f r) -> Channel a a' b b' f r
 
-    awaitDown :: forall a a' b f r. (Applicative f) => (a -> Channel a a' b b f r) -> Effectable f r -> Channel a a' b b f r
+    awaitDown :: forall a a' b f r. (Applicative f) => Effectable f r -> (a -> Channel a a' b b f r) -> Channel a a' b b f r
 
-    awaitUp :: forall a b b' f r. (Applicative f) => (b -> Channel a a b b' f r) -> Effectable f r -> Channel a a b b' f r
+    awaitUp :: forall a b b' f r. (Applicative f) => Effectable f r -> (b -> Channel a a b b' f r) -> Channel a a b b' f r
 
-    emit :: forall a a' b b' f r. (Applicative f) => Either a' b' -> Effectable f r -> Channel a a' b b' f r
+    emit :: forall a a' b b' f r. (Applicative f) => Effectable f r -> Either a' b' -> Channel a a' b b' f r
 
-    emitDown :: forall a a' b b' f r. (Applicative f) => b' -> Effectable f r -> Channel a a' b b' f r
+    emitDown :: forall a a' b b' f r. (Applicative f) => Effectable f r -> b' -> Channel a a' b b' f r
 
-    emitUp :: forall a a' b b' f r. (Applicative f) => a' -> Effectable f r -> Channel a a' b b' f r
+    emitUp :: forall a a' b b' f r. (Applicative f) => Effectable f r -> a' -> Channel a a' b b' f r
 
-    prependEffect :: forall a a' b b' f r x. (Functor f, Monoid r) => Channel a a' b b' f r -> f x -> Channel a a' b b' f r
+    finalizer :: forall a a' b b' f r x. (Applicative f) => f x -> Channel a a' b b' f r -> Channel a a' b b' f r
 
     runEffectable :: forall f a. (Applicative f) => Effectable f a -> f a
 
+    stack :: forall a a' a'' b b' b'' f r r'. (Applicative f) => Channel a a' b' b'' f r -> Channel a' a'' b b' f r' -> Channel a a'' b b'' f (Tuple r r')
+
+    strictEffectable :: forall f a. (Functor f) => Effectable f a -> Effectable f a
+
     terminate :: forall a a' b b' f r. (Applicative f) => Channel a a' b b' f r -> Effectable f r
+
+    terminator :: forall a a' b b' f r. (Applicative f) => Effectable f r -> Channel a a' b b' f r -> Channel a a' b b' f r
 
     unDownstream :: forall b f r a a'. Downstream b f r a a' -> Channel a a' b b f r
 

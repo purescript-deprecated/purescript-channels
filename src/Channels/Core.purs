@@ -3,10 +3,12 @@ module Channels.Core where
   import Data.Traversable(Traversable, traverse, sequence)
   import Data.Monoid(Monoid, mempty)
   import Data.Either(Either(..))
+  import Data.Tuple(Tuple(..))
   import Data.Lazy(Lazy(..), force, defer)
   import Control.Lazy(Lazy1, defer1)
   import Control.Bind
   import Control.Monad.Trans(MonadTrans, lift)
+  import Control.Apply
 
   -- | A value whose optionally lazy computation may or may not require an effect `f`.
   -- | This exists mainly for performance reasons, as always associating all values
@@ -48,37 +50,48 @@ module Channels.Core where
   unDownstream :: forall b f r a a'. Downstream b f r a a' -> Channel a a' b b f r
   unDownstream (Downstream c) = c
 
-  await :: forall a a' b b' f r. (Either a b -> Channel a a' b b' f r) -> Effectable f r -> Channel a a' b b' f r
-  await = Await
+  -- | Using the specified terminator, awaits an upstream or downstream value.
+  await :: forall a a' b b' f r. Effectable f r -> (Either a b -> Channel a a' b b' f r) -> Channel a a' b b' f r
+  await q f = Await f q
 
-  awaitDown :: forall a a' b f r. (Applicative f) => (a -> Channel a a' b b f r) -> Effectable f r -> Channel a a' b b f r
-  awaitDown f q = await g q
+  -- | Using the specified terminator, awaits a downstream value and passes 
+  -- | through all upstream values.
+  awaitDown :: forall a a' b f r. (Applicative f) => Effectable f r -> (a -> Channel a a' b b f r) -> Channel a a' b b f r
+  awaitDown q f = await q g
     where 
       g (Left a)  = f a
-      g (Right b) = emitDown b q
+      g (Right b) = emitDown q b
 
-  awaitUp :: forall a b b' f r. (Applicative f) => (b -> Channel a a b b' f r) -> Effectable f r -> Channel a a b b' f r
-  awaitUp f q = await g q
+  -- | Using the specified terminator, awaits an upstream value and passes 
+  -- | through all downstream values.
+  awaitUp :: forall a b b' f r. (Applicative f) => Effectable f r -> (b -> Channel a a b b' f r) -> Channel a a b b' f r
+  awaitUp q f = await q g
     where 
-      g (Left a)  = emitUp a q 
+      g (Left a)  = emitUp q a 
       g (Right b) = f b
 
+  -- | Using the specified terminator, emits an upstream or downstream value.
+  emit :: forall a a' b b' f r. (Applicative f) => Effectable f r -> Either a' b' -> Channel a a' b b' f r
+  emit fr e = Emit e (yield' (runEffectable fr)) fr
 
-  emit :: forall a a' b b' f r. (Applicative f) => Either a' b' -> Effectable f r -> Channel a a' b b' f r
-  emit e fr = Emit e (yield' (runEffectable fr)) fr
+  -- | Using the specified terminator, emits a downstream value.
+  emitDown :: forall a a' b b' f r. (Applicative f) => Effectable f r -> a' -> Channel a a' b b' f r
+  emitDown q a' = emit q (Left a')
 
-  emitUp :: forall a a' b b' f r. (Applicative f) => a' -> Effectable f r -> Channel a a' b b' f r
-  emitUp a' = emit (Left a')
+  -- | Using the specified terminator, emits an upstream value.
+  emitUp :: forall a a' b b' f r. (Applicative f) => Effectable f r -> b' -> Channel a a' b b' f r
+  emitUp q b' = emit q (Right b')
 
-  emitDown :: forall a a' b b' f r. (Applicative f) => b' -> Effectable f r -> Channel a a' b b' f r
-  emitDown b' = emit (Right b')
-
+  -- | Produces a channel that monadically returns the pure value `r`.
   yield :: forall a a' b b' f r. r -> Channel a a' b b' f r
   yield r = Stop r
 
+  -- | Produces a channel that monadically returns the effectful value `f r`.
   yield' :: forall a a' b b' f r. (Functor f) => f r -> Channel a a' b b' f r
   yield' fr = (ChanX (yield <$> fr)) (EffX fr)
 
+  -- | Forcibly terminates a channel (unless the channel has already 
+  -- | voluntarily terminated).
   terminate :: forall a a' b b' f r. (Applicative f) => Channel a a' b b' f r -> Effectable f r
   terminate (Emit _ _ q) = q
   terminate (Await  _ q) = q
@@ -86,8 +99,47 @@ module Channels.Core where
   terminate (ChanZ    l) = EffZ (defer \_ -> terminate (force l))
   terminate (Stop     r) = EffPure r
 
-  -- stack :: forall a a' a'' b b' b'' f r r'. (Monad f) => Channel a a' b' b'' f r -> Channel a' a'' b b' f r' -> Channel a a'' b b'' f (Tuple r r')
+  -- | Stacks one channel on top of another. Note that if one channel 
+  -- | terminates before the other, the second will be forcibly terminated.
+  -- | 
+  -- | Laziness is introduced when the two channels pass messages between each
+  -- | other. This allows channels to be stacked even when all they do is 
+  -- | forever pass each other messages.
+  stack :: forall a a' a'' b b' b'' f r r'. (Applicative f) => Channel a a' b' b'' f r -> Channel a' a'' b b' f r' -> Channel a a'' b b'' f (Tuple r r')
+  stack (Emit (Right b'') c1 q1) c2 = Emit (Right b'') (c1 `stack` c2)  (defer1 \_ -> (Tuple <$> q1 <*> terminate c2))
+  stack c1 (Emit (Left a'') c2 q2)  = Emit (Left a'') (c1 `stack` c2)   (defer1 \_ -> (Tuple <$> terminate c1 <*> q2))
+  stack (ChanX fc1 q1) c2           = ChanX (flip stack c2 <$> fc1)     (defer1 \_ -> (Tuple <$> q1 <*> terminate c2))
+  stack c1 (ChanX fc2 q2)           = ChanX (stack c1 <$> fc2)          (defer1 \_ -> (Tuple <$> terminate c1 <*> q2))
+  stack (ChanZ z1) c2               = ChanZ (flip stack c2 <$> z1)
+  stack c1 (ChanZ z2)               = ChanZ (stack c1 <$> z2)
+  stack (Stop r1) c2                = yield' (Tuple r1 <$> runEffectable (terminate c2))
+  stack c1 (Stop r2)                = yield' (flip Tuple r2 <$> runEffectable (terminate c1))
+  stack (Await f1 q1) (Emit (Right b') c2 q2) = defer1 \_ -> f1 (Right b') `stack` c2
+  stack (Emit (Left a') c1 q1) (Await f2 q2)  = defer1 \_ -> c1 `stack` f2 (Left a')
 
+  -- | Replaces the value that the channel will produce if forcibly terminated.
+  terminator :: forall a a' b b' f r. (Applicative f) => Effectable f r -> Channel a a' b b' f r -> Channel a a' b b' f r
+  terminator q = loop
+    where
+      loop (Emit e c _) = Emit e (loop c) q
+      loop (Await  f _) = Await (loop <$> f) q
+      loop (ChanX  x _) = ChanX (loop <$> x) q
+      loop (ChanZ    z) = ChanZ (loop <$> z)
+      loop (Stop     r) = Stop r
+
+  -- | Attaches the specified finalizer to the channel. The finalizer will be
+  -- | called when the channel is forcibly terminated or when it voluntarily 
+  -- | terminates (but just once).
+  finalizer :: forall a a' b b' f r x. (Applicative f) => f x -> Channel a a' b b' f r -> Channel a a' b b' f r
+  finalizer x = loop
+    where
+      x' = EffX x
+
+      loop (Emit e c q) = Emit e (loop c) (x' *> q)
+      loop (Await  f q) = Await (loop <$> f) (x' *> q)
+      loop (ChanX  x q) = ChanX (loop <$> x) (x' *> q)
+      loop (ChanZ    z) = ChanZ (loop <$> z)
+      loop (Stop     r) = yield' x *> Stop r
 
   instance showEffectable :: (Show (f a), Show a) => Show (Effectable f a) where 
     show (EffPure a) = "EffPure (" ++ show a ++ ")"
@@ -102,6 +154,7 @@ module Channels.Core where
     (<$>) f (EffX    x) = EffX (f <$> x)
     (<$>) f (EffZ    z) = EffZ ((<$>) f <$> z)
 
+  -- TODO: Implement apply and bind more efficiently!
   instance applyEffectable :: (Applicative f) => Apply (Effectable f) where
     (<*>) f x = defer1 \_ -> EffX (runEffectable f <*> runEffectable x)
 
