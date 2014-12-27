@@ -40,9 +40,9 @@ module Channels.Core where
   type UniChannel a b f r = Channel a a b b f r
 
   runEffectable :: forall f a. (Applicative f) => Effectable f a -> f a
-  runEffectable (EffP a) = pure a
-  runEffectable (EffX fa)   = fa
-  runEffectable (EffZ ef)   = runEffectable (force ef)
+  runEffectable (EffP a)  = pure a
+  runEffectable (EffX fa) = fa
+  runEffectable (EffZ ef) = runEffectable (force ef)
 
   unUpstream :: forall a f r b b'. Upstream a f r b b' -> Channel a a b b' f r
   unUpstream (Upstream c) = c
@@ -143,16 +143,16 @@ module Channels.Core where
 
   instance showEffectable :: (Show (f a), Show a) => Show (Effectable f a) where 
     show (EffP a) = "EffP (" ++ show a ++ ")"
-    show (EffX    x) = "EffX (" ++ show x ++ ")"
-    show (EffZ    z) = "EffZ (" ++ show z ++ ")"
+    show (EffX x) = "EffX (" ++ show x ++ ")"
+    show (EffZ z) = "EffZ (" ++ show z ++ ")"
 
   instance lazy1Effectable :: Lazy1 (Effectable f) where
     defer1 l = EffZ (defer l)
 
   instance functorEffectable :: (Functor f) => Functor (Effectable f) where 
     (<$>) f (EffP a) = EffP (f a)
-    (<$>) f (EffX    x) = EffX (f <$> x)
-    (<$>) f (EffZ    z) = EffZ ((<$>) f <$> z)
+    (<$>) f (EffX x) = EffX (f <$> x)
+    (<$>) f (EffZ z) = EffZ ((<$>) f <$> z)
 
   -- TODO: Implement apply and bind more efficiently!
   instance applyEffectable :: (Applicative f) => Apply (Effectable f) where
