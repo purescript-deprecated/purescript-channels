@@ -13,7 +13,7 @@ module Channels.Core where
   -- | A value whose optionally lazy computation may or may not require an effect `f`.
   -- | This exists mainly for performance reasons, as always associating all values
   -- | with lazily computed effects adds several layers of indirection.
-  data Effectable f a = EffPure a | EffX (f a) | EffZ (Lazy (Effectable f a))
+  data Effectable f a = EffP a | EffX (f a) | EffZ (Lazy (Effectable f a))
 
   -- | A bidirectional, event-driven channel of communication. 
   -- | 
@@ -40,7 +40,7 @@ module Channels.Core where
   type UniChannel a b f r = Channel a a b b f r
 
   runEffectable :: forall f a. (Applicative f) => Effectable f a -> f a
-  runEffectable (EffPure a) = pure a
+  runEffectable (EffP a) = pure a
   runEffectable (EffX fa)   = fa
   runEffectable (EffZ ef)   = runEffectable (force ef)
 
@@ -97,7 +97,7 @@ module Channels.Core where
   terminate (Await  _ q) = q
   terminate (ChanX  _ q) = q
   terminate (ChanZ    l) = EffZ (defer \_ -> terminate (force l))
-  terminate (Stop     r) = EffPure r
+  terminate (Stop     r) = EffP r
 
   -- | Stacks one channel on top of another. Note that if one channel 
   -- | terminates before the other, the second will be forcibly terminated.
@@ -142,7 +142,7 @@ module Channels.Core where
       loop (Stop     r) = yield' x *> Stop r
 
   instance showEffectable :: (Show (f a), Show a) => Show (Effectable f a) where 
-    show (EffPure a) = "EffPure (" ++ show a ++ ")"
+    show (EffP a) = "EffP (" ++ show a ++ ")"
     show (EffX    x) = "EffX (" ++ show x ++ ")"
     show (EffZ    z) = "EffZ (" ++ show z ++ ")"
 
@@ -150,7 +150,7 @@ module Channels.Core where
     defer1 l = EffZ (defer l)
 
   instance functorEffectable :: (Functor f) => Functor (Effectable f) where 
-    (<$>) f (EffPure a) = EffPure (f a)
+    (<$>) f (EffP a) = EffP (f a)
     (<$>) f (EffX    x) = EffX (f <$> x)
     (<$>) f (EffZ    z) = EffZ ((<$>) f <$> z)
 
@@ -159,7 +159,7 @@ module Channels.Core where
     (<*>) f x = defer1 \_ -> EffX (runEffectable f <*> runEffectable x)
 
   instance applicativeEffectable :: (Applicative f) => Applicative (Effectable f) where
-    pure a = EffPure a
+    pure a = EffP a
 
   instance bindEffectable :: (Monad f) => Bind (Effectable f) where
     (>>=) fa f = defer1 \_ -> EffX (runEffectable fa >>= (runEffectable <$> f))
@@ -173,7 +173,7 @@ module Channels.Core where
     (<>) x y = defer1 \_ -> (EffX ((<>) <$> runEffectable x <*> runEffectable y))
 
   instance monoidEffectable :: (Applicative f, Monoid a) => Monoid (Effectable f a) where 
-    mempty = EffPure mempty
+    mempty = EffP mempty
 
   instance foldableEffectable :: (Applicative f, Foldable f) => Foldable (Effectable f) where
     foldr f b fa = foldr f b (runEffectable fa)
