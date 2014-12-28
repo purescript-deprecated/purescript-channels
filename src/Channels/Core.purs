@@ -15,14 +15,14 @@ module Channels.Core where
   -- | with lazily computed effects adds several layers of indirection.
   data Effectable f a = EffP a | EffX (f a) | EffZ (Lazy (Effectable f a))
 
-  -- | A bidirectional, event-driven channel of communication. 
+  -- | A bidirectional, event-driven channel of communication.
   -- | 
   -- | Channels have an upstream component, which transforms `b` to `b'`, and
   -- | a downstream component, which transforms `a` to `a'`. 
   -- | 
   -- | Channels may emit values upstream or downstream, await upstream / 
   -- | downstream values, execute an effect, defer computation of a channel, 
-  -- | or voluntarily terminate with a result value `r`.
+  -- | or voluntarily terminate with a final result value `r`.
   -- |
   -- | All channels may be forcefully terminated to produce an `f r`.
   -- | 
@@ -38,6 +38,23 @@ module Channels.Core where
   newtype Downstream b f r a a' = Downstream (Channel a a' b b f r)
 
   type UniChannel a b f r = Channel a a b b f r
+
+  -- | A source, defined as a channel that never emits upstream values or 
+  -- | awaits downstream values. Since we can't enforce that using the type 
+  -- | system, we loosen the definition to a channel that emits unit for 
+  -- | upstream and awaits unit from downstream.
+  type Source f a b r = Channel Unit a b Unit f r
+
+  -- | A sink, defined as a channel that never emits downstream values or 
+  -- | awaits upstream values. Since we can't enforce that using the type 
+  -- | system, we loosen the definition to a channel that emits unit for
+  -- | downstream and awaits unit from upstream.
+  type Sink f a b r = Channel a Unit Unit b f r
+
+  -- | A workflow consists of a source stacked on a sink. Such a channel
+  -- | can be run to completion because all it ever awaits or emits are 
+  -- | unit values.
+  type Workflow f r = Channel Unit Unit Unit Unit f r
 
   runEffectable :: forall f a. (Applicative f) => Effectable f a -> f a
   runEffectable (EffP a)  = pure a
@@ -140,6 +157,14 @@ module Channels.Core where
       loop (ChanX  x q) = ChanX (loop <$> x) (x' *> q)
       loop (ChanZ    z) = ChanZ (loop <$> z)
       loop (Stop     r) = yield' x *> Stop r
+
+  -- | Runs a workflow to completion. TODO: stack overflow.
+  runChannel :: forall f r. (Monad f) => Workflow f r -> f r
+  runChannel (Emit _ c _) = runChannel c
+  runChannel (Await  f _) = runChannel (f (Left unit))
+  runChannel (ChanX  x _) = x >>= runChannel
+  runChannel (ChanZ    z) = runChannel (force z)
+  runChannel (Stop     r) = pure r
 
   instance showEffectable :: (Show (f a), Show a) => Show (Effectable f a) where 
     show (EffP a) = "EffP (" ++ show a ++ ")"

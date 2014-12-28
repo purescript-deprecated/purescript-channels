@@ -19,10 +19,16 @@
       EffX :: f a -> Effectable f a
       EffZ :: Lazy (Effectable f a) -> Effectable f a
 
+    type Sink f a b r = Channel a Unit Unit b f r
+
+    type Source f a b r = Channel Unit a b Unit f r
+
     type UniChannel a b f r = Channel a a b b f r
 
     newtype Upstream a f r b b' where
       Upstream :: Channel a a b b' f r -> Upstream a f r b b'
+
+    type Workflow f r = Channel Unit Unit Unit Unit f r
 
 
 ### Type Class Instances
@@ -85,6 +91,8 @@
     emitUp :: forall a a' b b' f r. (Applicative f) => Effectable f r -> b' -> Channel a a' b b' f r
 
     finalizer :: forall a a' b b' f r x. (Applicative f) => f x -> Channel a a' b b' f r -> Channel a a' b b' f r
+
+    runChannel :: forall f r. (Monad f) => Workflow f r -> f r
 
     runEffectable :: forall f a. (Applicative f) => Effectable f a -> f a
 
