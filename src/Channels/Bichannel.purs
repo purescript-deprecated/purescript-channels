@@ -46,8 +46,12 @@ module Channels.Bichannel
 
   type Biworkflow f r = Bichannel Unit Unit Unit Unit f r
 
+  -- | An upstream bichannel does not modify the type of the downstream channel.
+  -- | Upstream bichannels form a semigroupoid, category, and profunctor.
   newtype Upstream a f r b b' = Upstream (Bichannel a a b b' f r)
 
+  -- | A downstream bichannel does not modify the type of the upstream channel.
+  -- | Downstream bichannels form a semigroupoid, category, and profunctor.
   newtype Downstream b f r a a' = Downstream (Bichannel a a' b b f r)
 
   unUpstream :: forall a f r b b'. Upstream a f r b b' -> Bichannel a a b b' f r
@@ -56,6 +60,7 @@ module Channels.Bichannel
   unDownstream :: forall b f r a a'. Downstream b f r a a' -> Bichannel a a' b b f r
   unDownstream (Downstream c) = c
 
+  -- | Converts a stream to an upstream bichannel.
   toUpstream :: forall a f r b b'. (Functor f) => Stream f r b b' -> Upstream a f r b b'
   toUpstream (Stream c) = Upstream (loop' c)
     where loop' (Yield o c q) = Yield (Right o) (loop' c) q
@@ -64,6 +69,7 @@ module Channels.Bichannel
           loop' (ChanZ     z) = ChanZ (loop' <$> z)
           loop' (Stop      r) = Stop r
 
+  -- | Converts a stream to a downstream bichannel.
   toDownstream :: forall b f r a a'. (Functor f) => Stream f r a a' -> Downstream b f r a a'
   toDownstream (Stream c) = Downstream (loop' c)
     where loop' (Yield o c q) = Yield (Left o) (loop' c) q
@@ -72,6 +78,7 @@ module Channels.Bichannel
           loop' (ChanZ     z) = ChanZ (loop' <$> z)
           loop' (Stop      r) = Stop r
 
+  -- | Flips the upstream and downstream channels of the bichannel.
   reflect :: forall a a' b b' f r. (Applicative f) => Bichannel a a' b b' f r -> Bichannel b b' a a' f r
   reflect c = unStream (dimap (either Right Left) (either Right Left) (Stream c))
 
@@ -117,9 +124,11 @@ module Channels.Bichannel
   stack (Await f1 q1) (Yield (Right b') c2 q2) = defer1 \_ -> f1 (Right b') `stack` c2
   stack (Yield (Left a') c1 q1) (Await f2 q2)  = defer1 \_ -> c1 `stack` f2 (Left a')
 
+  -- | Converts a biworkflow to a workflow.
   toWorkflow :: forall f r. (Applicative f) => Biworkflow f r -> Workflow f r
   toWorkflow c = unStream (dimap Left (const unit) (Stream c))
 
+  -- | Runs a biworkflow.
   runBiworkflow :: forall f r. (Monad f) => Biworkflow f r -> f r
   runBiworkflow = toWorkflow >>> runWorkflow
 
