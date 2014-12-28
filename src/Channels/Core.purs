@@ -1,30 +1,24 @@
 module Channels.Core
   ( Effectable()
   , Channel(..)
-  , Sink(..)
-  , Source(..)
-  , UniChannel(..)
   , Workflow(..)
   , await
-  , awaitDown
-  , awaitUp
+  , compose
   , finalizer
-  , runChannel
+  , loop
   , runEffectable
-  , stack
+  , runWorkflow
   , stop
   , stop'
   , terminate
   , terminator
   , yield
-  , yieldDown
-  , yieldUp
+  , yield'
   ) where 
 
   import Data.Foldable(Foldable, foldl, foldr, foldMap)
   import Data.Traversable(Traversable, traverse, sequence)
   import Data.Monoid(Monoid, mempty)
-  import Data.Either(Either(..))
   import Data.Tuple(Tuple(..))
   import Data.Lazy(Lazy(..), force, defer)
   import Control.Lazy(Lazy1, defer1)
@@ -37,147 +31,112 @@ module Channels.Core
   -- | with lazily computed effects adds several layers of indirection.
   data Effectable f a = EffP a | EffX (f a) | EffZ (Lazy (Effectable f a))
 
-  -- | A bidirectional, event-driven channel of communication.
+  -- | An event-driven channel of communication with a well-defined lifecycle.
   -- | 
-  -- | Channels have an upstream component, which transforms `b` to `b'`, and
-  -- | a downstream component, which transforms `a` to `a'`. 
-  -- | 
-  -- | Channels may emit values upstream or downstream, await upstream / 
-  -- | downstream values, execute an effect, defer computation of a channel, 
-  -- | or voluntarily terminate with a final result value `r`.
+  -- | Channels may yield output values, await input values, execute effects, 
+  -- | defer computation of a channel, and voluntarily terminate with a final
+  -- | result value `r`.
   -- |
   -- | All channels may be forcefully terminated to produce an `f r`.
-  -- | 
-  data Channel a a' b b' f r
-    = Yield (Either a' b') (Channel a a' b b' f r) (Effectable f r)
-    | Await (Either a b -> Channel a a' b b' f r) (Effectable f r)
-    | ChanX (f (Channel a a' b b' f r)) (Effectable f r)
-    | ChanZ (Lazy (Channel a a' b b' f r))
+  data Channel i o f r
+    = Yield o (Channel i o f r) (Effectable f r)
+    | Await (i -> Channel i o f r) (Effectable f r)
+    | ChanX (f (Channel i o f r)) (Effectable f r)
+    | ChanZ (Lazy (Channel i o f r))
     | Stop r  
 
-  type UniChannel a b f r = Channel a a b b f r
-
-  -- | A source, defined as a channel that never emits upstream values or 
-  -- | awaits downstream values. Since we can't enforce that using the type 
-  -- | system, we loosen the definition to a channel that emits unit for 
-  -- | upstream and awaits unit from downstream.
-  type Source f a b r = Channel Unit a b Unit f r
-
-  -- | A sink, defined as a channel that never emits downstream values or 
-  -- | awaits upstream values. Since we can't enforce that using the type 
-  -- | system, we loosen the definition to a channel that emits unit for
-  -- | downstream and awaits unit from upstream.
-  type Sink f a b r = Channel a Unit Unit b f r
-
-  -- | A workflow consists of a source stacked on a sink. Such a channel
-  -- | can be run to completion because all it ever awaits or emits are 
-  -- | unit values.
-  type Workflow f r = Channel Unit Unit Unit Unit f r
+  -- | A workflow consists of a channel which awaits and emits unit values.
+  -- | Such a channel can be trivially run.
+  type Workflow f r = Channel Unit Unit f r
 
   runEffectable :: forall f a. (Applicative f) => Effectable f a -> f a
-  runEffectable (EffP a)  = pure a
+  runEffectable (EffP  a) = pure a
   runEffectable (EffX fa) = fa
   runEffectable (EffZ ef) = runEffectable (force ef)
 
-  -- | Using the specified terminator, awaits an upstream or downstream value.
-  await :: forall a a' b b' f r. Effectable f r -> (Either a b -> Channel a a' b b' f r) -> Channel a a' b b' f r
+  -- | Runs a workflow to completion. TODO: stack overflow.
+  runWorkflow :: forall f r. (Monad f) => Workflow f r -> f r
+  runWorkflow (Yield _ c _) = runWorkflow c
+  runWorkflow (Await   f _) = runWorkflow (f unit)
+  runWorkflow (ChanX   x _) = x >>= runWorkflow
+  runWorkflow (ChanZ     z) = runWorkflow (force z)
+  runWorkflow (Stop      r) = pure r
+
+  loop :: forall i o f r. (Functor f) => Channel i o f r -> Channel i o f r
+  loop c0 = loop' c0
+    where loop' (Yield o c q) = Yield o (loop' c) q
+          loop' (Await   f q) = Await (loop' <$> f) q
+          loop' (ChanX   x q) = ChanX (loop' <$> x) q
+          loop' (ChanZ     z) = ChanZ (loop' <$> z)
+          loop' (Stop      _) = c0
+
+  -- | Using the specified terminator, awaits a value.
+  await :: forall i o f r. Effectable f r -> (i -> Channel i o f r) -> Channel i o f r
   await q f = Await f q
 
-  -- | Using the specified terminator, awaits a downstream value and passes 
-  -- | through all upstream values.
-  awaitDown :: forall a a' b f r. (Applicative f) => Effectable f r -> (a -> Channel a a' b b f r) -> Channel a a' b b f r
-  awaitDown q f = await q g
-    where 
-      g (Left a)  = f a
-      g (Right b) = yieldUp q b
+  -- | Using the specified terminator, yields a value.
+  yield :: forall i o f r. (Applicative f) => Effectable f r -> o -> Channel i o f r
+  yield fr o = Yield o (stop' (runEffectable fr)) fr
 
-  -- | Using the specified terminator, awaits an upstream value and passes 
-  -- | through all downstream values.
-  awaitUp :: forall a b b' f r. (Applicative f) => Effectable f r -> (b -> Channel a a b b' f r) -> Channel a a b b' f r
-  awaitUp q f = await q g
-    where 
-      g (Left a)  = yieldDown q a 
-      g (Right b) = f b
+  -- | Using the specified terminator, yields an effectful value.
+  yield' :: forall i o f r. (Applicative f) => Effectable f r -> f o -> Channel i o f r
+  yield' fr fo = ChanX (yield fr <$> fo) fr
 
-  -- | Using the specified terminator, emits an upstream or downstream value.
-  yield :: forall a a' b b' f r. (Applicative f) => Effectable f r -> Either a' b' -> Channel a a' b b' f r
-  yield fr e = Yield e (stop' (runEffectable fr)) fr
-
-  -- | Using the specified terminator, emits a downstream value.
-  yieldDown :: forall a a' b b' f r. (Applicative f) => Effectable f r -> a' -> Channel a a' b b' f r
-  yieldDown q a' = yield q (Left a')
-
-  -- | Using the specified terminator, emits an upstream value.
-  yieldUp :: forall a a' b b' f r. (Applicative f) => Effectable f r -> b' -> Channel a a' b b' f r
-  yieldUp q b' = yield q (Right b')
-
-  -- | Produces a channel that monadically returns the pure value `r`.
-  stop :: forall a a' b b' f r. r -> Channel a a' b b' f r
+  -- | Produces a channel that stops the channel with the pure value `r`.
+  stop :: forall i o f r. r -> Channel i o f r
   stop r = Stop r
 
-  -- | Produces a channel that monadically returns the effectful value `f r`.
-  stop' :: forall a a' b b' f r. (Functor f) => f r -> Channel a a' b b' f r
+  -- | Produces a channel that stops the channel with the effectful value `f r`.
+  stop' :: forall i o f r. (Functor f) => f r -> Channel i o f r
   stop' fr = (ChanX (stop <$> fr)) (EffX fr)
 
   -- | Forcibly terminates a channel (unless the channel has already 
   -- | voluntarily terminated).
-  terminate :: forall a a' b b' f r. (Applicative f) => Channel a a' b b' f r -> Effectable f r
+  terminate :: forall i o f r. (Applicative f) => Channel i o f r -> Effectable f r
   terminate (Yield _ _ q) = q
-  terminate (Await  _ q) = q
-  terminate (ChanX  _ q) = q
-  terminate (ChanZ    l) = EffZ (defer \_ -> terminate (force l))
-  terminate (Stop     r) = EffP r
-
-  -- | Stacks one channel on top of another. Note that if one channel 
-  -- | terminates before the other, the second will be forcibly terminated.
-  -- | 
-  -- | Laziness is introduced when the two channels pass messages between each
-  -- | other. This allows channels to be stacked even when all they do is 
-  -- | forever pass each other messages (e.g. stacking a source on a sink).
-  stack :: forall a a' a'' b b' b'' f r r'. (Applicative f) => Channel a a' b' b'' f r -> Channel a' a'' b b' f r' -> Channel a a'' b b'' f (Tuple r r')
-  stack (Yield (Right b'') c1 q1) c2 = Yield (Right b'') (c1 `stack` c2)  (defer1 \_ -> (Tuple <$> q1 <*> terminate c2))
-  stack c1 (Yield (Left a'') c2 q2)  = Yield (Left a'') (c1 `stack` c2)   (defer1 \_ -> (Tuple <$> terminate c1 <*> q2))
-  stack (ChanX fc1 q1) c2           = ChanX (flip stack c2 <$> fc1)     (defer1 \_ -> (Tuple <$> q1 <*> terminate c2))
-  stack c1 (ChanX fc2 q2)           = ChanX (stack c1 <$> fc2)          (defer1 \_ -> (Tuple <$> terminate c1 <*> q2))
-  stack (ChanZ z1) c2               = ChanZ (flip stack c2 <$> z1)
-  stack c1 (ChanZ z2)               = ChanZ (stack c1 <$> z2)
-  stack (Stop r1) c2                = stop' (Tuple r1 <$> runEffectable (terminate c2))
-  stack c1 (Stop r2)                = stop' (flip Tuple r2 <$> runEffectable (terminate c1))
-  stack (Await f1 q1) (Yield (Right b') c2 q2) = defer1 \_ -> f1 (Right b') `stack` c2
-  stack (Yield (Left a') c1 q1) (Await f2 q2)  = defer1 \_ -> c1 `stack` f2 (Left a')
+  terminate (Await   _ q) = q
+  terminate (ChanX   _ q) = q
+  terminate (ChanZ     l) = EffZ (defer \_ -> terminate (force l))
+  terminate (Stop      r) = EffP r
 
   -- | Replaces the value that the channel will produce if forcibly terminated.
-  terminator :: forall a a' b b' f r. (Applicative f) => Effectable f r -> Channel a a' b b' f r -> Channel a a' b b' f r
+  terminator :: forall i o f r. (Applicative f) => Effectable f r -> Channel i o f r -> Channel i o f r
   terminator q = loop
     where
-      loop (Yield e c _) = Yield e (loop c) q
-      loop (Await  f _) = Await (loop <$> f) q
-      loop (ChanX  x _) = ChanX (loop <$> x) q
-      loop (ChanZ    z) = ChanZ (loop <$> z)
-      loop (Stop     r) = Stop r
+      loop (Yield o c _) = Yield o (loop c) q
+      loop (Await   f _) = Await (loop <$> f) q
+      loop (ChanX   x _) = ChanX (loop <$> x) q
+      loop (ChanZ     z) = ChanZ (loop <$> z)
+      loop (Stop      r) = Stop r
 
   -- | Attaches the specified finalizer to the channel. The finalizer will be
   -- | called when the channel is forcibly terminated or when it voluntarily 
   -- | terminates (but just once).
-  finalizer :: forall a a' b b' f r x. (Applicative f) => f x -> Channel a a' b b' f r -> Channel a a' b b' f r
+  finalizer :: forall i o f r x. (Applicative f) => f x -> Channel i o f r -> Channel i o f r
   finalizer x = loop
     where
       x' = EffX x
 
-      loop (Yield e c q) = Yield e (loop c) (x' *> q)
-      loop (Await  f q) = Await (loop <$> f) (x' *> q)
-      loop (ChanX  x q) = ChanX (loop <$> x) (x' *> q)
-      loop (ChanZ    z) = ChanZ (loop <$> z)
-      loop (Stop     r) = stop' x *> Stop r
+      loop (Yield o c q) = Yield o (loop c) (x' *> q)
+      loop (Await   f q) = Await (loop <$> f) (x' *> q)
+      loop (ChanX   x q) = ChanX (loop <$> x) (x' *> q)
+      loop (ChanZ     z) = ChanZ (loop <$> z)
+      loop (Stop      r) = stop' x *> Stop r
 
-  -- | Runs a workflow to completion. TODO: stack overflow.
-  runChannel :: forall f r. (Monad f) => Workflow f r -> f r
-  runChannel (Yield _ c _) = runChannel c
-  runChannel (Await  f _) = runChannel (f (Left unit))
-  runChannel (ChanX  x _) = x >>= runChannel
-  runChannel (ChanZ    z) = runChannel (force z)
-  runChannel (Stop     r) = pure r
+  -- | Composes two channels together by feeding the output of one into the 
+  -- | input of the other.
+  compose :: forall f r b c d. (Applicative f, Semigroup r) => Channel c d f r -> Channel b c f r -> Channel b d f r
+  compose c1 (Await f2 q2)    = Await (compose c1 <$> f2) (q2 <> terminate c1)
+  compose (Yield o c1 q1) c2  = Yield o (c1 `compose` c2) (terminate c2 <> q1)
+  compose c1 (ChanX fc2 q2)   = ChanX (compose c1 <$> fc2) (q2 <> terminate c1)
+  compose c1 (ChanZ zc2)      = ChanZ (compose c1 <$> zc2)
+  compose (ChanX fc1 q1) c2   = ChanX (flip compose c2 <$> fc1) (terminate c2 <> q1)
+  compose (ChanZ zc1) c2      = ChanZ (flip compose c2 <$> zc1)
+  compose (Stop r1) c2        = stop' (flip (<>) r1 <$> runEffectable (terminate c2))
+  compose c1 (Stop r2)        = stop' ((<>) r2 <$> runEffectable (terminate c1))
+  compose (Await f1 _) (Yield o c2 _) = defer1 \_ -> f1 o `compose` c2
 
+  -- Effectable instances
   instance showEffectable :: (Show (f a), Show a) => Show (Effectable f a) where 
     show (EffP a) = "EffP (" ++ show a ++ ")"
     show (EffX x) = "EffX (" ++ show x ++ ")"
@@ -222,50 +181,49 @@ module Channels.Core
 
     sequence tma = EffX <$> sequence (runEffectable tma)
 
-
-
-  instance lazy1Channel :: Lazy1 (Channel a a' b b' f) where
+  -- Channel instances
+  instance lazy1Channel :: Lazy1 (Channel i o f) where
     defer1 l = ChanZ (defer l)
 
-  instance functorChannel :: (Functor f) => Functor (Channel a a' b b' f) where
-    (<$>) f (Yield  e c q) = Yield e (f <$> c) (f <$> q)
+  instance functorChannel :: (Functor f) => Functor (Channel i o f) where
+    (<$>) f (Yield o c q) = Yield o (f <$> c) (f <$> q)
     (<$>) f (Await   g q) = Await ((<$>) f <$> g) (f <$> q)
     (<$>) f (ChanX   x q) = ChanX ((<$>) f <$> x) (f <$> q)
     (<$>) f (ChanZ     z) = ChanZ ((<$>) f <$> z)
     (<$>) f (Stop      r) = Stop (f r)
 
-  instance semigroupChannel :: (Applicative f, Semigroup r) => Semigroup (Channel a a b b f r) where
-    (<>) (Yield e c q) w = Yield e (c <> w) q
-    (<>) (Await  f q) w = Await (flip (<>) w <$> f) q
-    (<>) (ChanX  x q) w = ChanX (flip (<>) w <$> x) q
-    (<>) (ChanZ    z) w = ChanZ (flip (<>) w <$> z)
-    (<>) (Stop     r) w = (<>) r <$> w
+  instance semigroupChannel :: (Applicative f, Semigroup r) => Semigroup (Channel io io f r) where
+    (<>) (Yield o c q) w = Yield o (c <> w) q
+    (<>) (Await   f q) w = Await (flip (<>) w <$> f) q
+    (<>) (ChanX   x q) w = ChanX (flip (<>) w <$> x) q
+    (<>) (ChanZ     z) w = ChanZ (flip (<>) w <$> z)
+    (<>) (Stop      r) w = (<>) r <$> w
 
-  instance monoidChannel :: (Applicative f, Monoid r) => Monoid (Channel a a b b f r) where
+  instance monoidChannel :: (Applicative f, Monoid r) => Monoid (Channel io io f r) where
     mempty = Stop mempty 
 
-  instance applyChannel :: (Applicative f) => Apply (Channel a a' b b' f) where
-    (<*>) (Yield e c q) w = Yield e (c <*> w) (q <*> terminate w)
-    (<*>) (Await  g q) w = Await (flip (<*>) w <$> g) (q <*> terminate w)
-    (<*>) (ChanX  x q) w = ChanX (flip (<*>) w <$> x) (q <*> terminate w)
-    (<*>) (ChanZ    z) w = ChanZ (flip (<*>) w <$> z)
-    (<*>) v @ (Stop f) (Yield e c q) = Yield e (v <*> c) (pure f <*> q)
-    (<*>) v @ (Stop f) (Await  g q) = Await ((<*>) v <$> g) (pure f <*> q)
-    (<*>) v @ (Stop f) (ChanX  x q) = ChanX ((<*>) v <$> x) (pure f <*> q)
-    (<*>) v @ (Stop f) (ChanZ    z) = ChanZ ((<*>) v <$> z)
-    (<*>) v @ (Stop f) (Stop     x) = Stop (f x)
+  instance applyChannel :: (Applicative f) => Apply (Channel i o f) where
+    (<*>) (Yield o c q) w = Yield o (c <*> w) (q <*> terminate w)
+    (<*>) (Await   g q) w = Await (flip (<*>) w <$> g) (q <*> terminate w)
+    (<*>) (ChanX   x q) w = ChanX (flip (<*>) w <$> x) (q <*> terminate w)
+    (<*>) (ChanZ     z) w = ChanZ (flip (<*>) w <$> z)
+    (<*>) v @ (Stop f) (Yield o c q) = Yield o (v <*> c) (pure f <*> q)
+    (<*>) v @ (Stop f) (Await  g q)  = Await ((<*>) v <$> g) (pure f <*> q)
+    (<*>) v @ (Stop f) (ChanX  x q)  = ChanX ((<*>) v <$> x) (pure f <*> q)
+    (<*>) v @ (Stop f) (ChanZ    z)  = ChanZ ((<*>) v <$> z)
+    (<*>) v @ (Stop f) (Stop     x)  = Stop (f x)
 
-  instance applicativeChannel :: (Applicative f) => Applicative (Channel a a' b b' f) where
+  instance applicativeChannel :: (Applicative f) => Applicative (Channel i o f) where
     pure r = Stop r
 
-  instance bindChannel :: (Monad f) => Bind (Channel a a' b b' f) where
-    (>>=) (Yield e c q) f = Yield e (c >>= f) (q >>= (terminate <$> f))
-    (>>=) (Await  g q) f = Await (flip (>>=) f <$> g) (q >>= (terminate <$> f))
-    (>>=) (ChanX  x q) f = ChanX (flip (>>=) f <$> x) (q >>= (terminate <$> f))
-    (>>=) (ChanZ    z) f = ChanZ (flip (>>=) f <$> z)
-    (>>=) (Stop     r) f = f r
+  instance bindChannel :: (Monad f) => Bind (Channel i o f) where
+    (>>=) (Yield o c q) f = Yield o (c >>= f) (q >>= (terminate <$> f))
+    (>>=) (Await   g q) f = Await (flip (>>=) f <$> g) (q >>= (terminate <$> f))
+    (>>=) (ChanX   x q) f = ChanX (flip (>>=) f <$> x) (q >>= (terminate <$> f))
+    (>>=) (ChanZ     z) f = ChanZ (flip (>>=) f <$> z)
+    (>>=) (Stop      r) f = f r
 
-  instance monadChannel :: (Monad f) => Monad (Channel a a' b b' f)
+  instance monadChannel :: (Monad f) => Monad (Channel i o f)
 
-  instance monadTransChannel :: MonadTrans (Channel a a' b b') where 
+  instance monadTransChannel :: MonadTrans (Channel i o) where 
     lift = stop'

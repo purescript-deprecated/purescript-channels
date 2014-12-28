@@ -1,0 +1,36 @@
+module Channels.Stream where
+  import Data.Monoid(Monoid, mempty) 
+  import Data.Profunctor
+  import Control.Lazy(defer1)
+
+  import Channels.Core
+
+  newtype Stream f r i o = Stream (Channel i o f r)
+
+  unStream :: forall f r i o. Stream f r i o -> Channel i o f r
+  unStream (Stream c) = c
+
+  moore :: forall f r i o. (Applicative f, Monoid r) => (i -> o) -> Stream f r i o
+  moore f = Stream (loop (await q (f >>> yield q)))
+    where q = pure mempty
+
+  moore' :: forall f r i o. (Applicative f, Monoid r) => (i -> f o) -> Stream f r i o
+  moore' f = Stream (loop (await q (f >>> yield' q)))
+    where q = pure mempty
+
+  instance semigroupoidStream :: (Applicative f, Semigroup r) => Semigroupoid (Stream f r) where
+    (<<<) (Stream c1) (Stream c2) = Stream (compose c1 c2)
+
+  instance categoryStream :: (Applicative f, Monoid r) => Category (Stream f r) where
+    id = Stream (loop (await q (yield q)))
+      where q = pure mempty
+
+  instance profunctorStream :: (Applicative f) => Profunctor (Stream f r) where
+    dimap f g (Stream c) = Stream (dimap' c)
+      where dimap' (Yield o c q) = Yield (g o) (dimap' c) q
+            dimap' (Await   h q) = Await (f >>> (dimap' <$> h)) q
+            dimap' (ChanX   x q) = ChanX (dimap' <$> x) q
+            dimap' (ChanZ     z) = ChanZ (dimap' <$> z)
+            dimap' (Stop      r) = Stop r
+
+  

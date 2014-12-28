@@ -1,64 +1,88 @@
 # Module Documentation
 
+## Module Channels.Bichannel
+
+### Types
+
+    type Bichannel a a' b b' f r = Channel (Either a b) (Either a' b') f r
+
+    type Bisink f a b r = Bichannel a Unit Unit b f r
+
+    type Bisource f a b r = Bichannel Unit a b Unit f r
+
+    type Biworkflow f r = Bichannel Unit Unit Unit Unit f r
+
+
+### Values
+
+    awaitDown :: forall a a' b f r. (Applicative f) => Effectable f r -> (a -> Bichannel a a' b b f r) -> Bichannel a a' b b f r
+
+    awaitUp :: forall a b b' f r. (Applicative f) => Effectable f r -> (b -> Bichannel a a b b' f r) -> Bichannel a a b b' f r
+
+    runBiworkflow :: forall f r. (Monad f) => Biworkflow f r -> f r
+
+    stack :: forall a a' a'' b b' b'' f r r'. (Applicative f) => Bichannel a a' b' b'' f r -> Bichannel a' a'' b b' f r' -> Bichannel a a'' b b'' f (Tuple r r')
+
+    toWorkflow :: forall f r. (Applicative f) => Biworkflow f r -> Workflow f r
+
+    yieldDown :: forall a a' b b' f r. (Applicative f) => Effectable f r -> a' -> Bichannel a a' b b' f r
+
+    yieldUp :: forall a a' b b' f r. (Applicative f) => Effectable f r -> b' -> Bichannel a a' b b' f r
+
+
 ## Module Channels.Core
 
 ### Types
 
-    data Channel a a' b b' f r where
-      Yield :: Either a' b' -> Channel a a' b b' f r -> Effectable f r -> Channel a a' b b' f r
-      Await :: (Either a b -> Channel a a' b b' f r) -> Effectable f r -> Channel a a' b b' f r
-      ChanX :: f (Channel a a' b b' f r) -> Effectable f r -> Channel a a' b b' f r
-      ChanZ :: Lazy (Channel a a' b b' f r) -> Channel a a' b b' f r
-      Stop :: r -> Channel a a' b b' f r
+    data Channel i o f r where
+      Yield :: o -> Channel i o f r -> Effectable f r -> Channel i o f r
+      Await :: (i -> Channel i o f r) -> Effectable f r -> Channel i o f r
+      ChanX :: f (Channel i o f r) -> Effectable f r -> Channel i o f r
+      ChanZ :: Lazy (Channel i o f r) -> Channel i o f r
+      Stop :: r -> Channel i o f r
 
     data Effectable f a
 
-    type Sink f a b r = Channel a Unit Unit b f r
-
-    type Source f a b r = Channel Unit a b Unit f r
-
-    type UniChannel a b f r = Channel a a b b f r
-
-    type Workflow f r = Channel Unit Unit Unit Unit f r
+    type Workflow f r = Channel Unit Unit f r
 
 
 ### Type Class Instances
 
-    instance applicativeChannel :: (Applicative f) => Applicative (Channel a a' b b' f)
+    instance applicativeChannel :: (Applicative f) => Applicative (Channel i o f)
 
     instance applicativeEffectable :: (Applicative f) => Applicative (Effectable f)
 
-    instance applyChannel :: (Applicative f) => Apply (Channel a a' b b' f)
+    instance applyChannel :: (Applicative f) => Apply (Channel i o f)
 
     instance applyEffectable :: (Applicative f) => Apply (Effectable f)
 
-    instance bindChannel :: (Monad f) => Bind (Channel a a' b b' f)
+    instance bindChannel :: (Monad f) => Bind (Channel i o f)
 
     instance bindEffectable :: (Monad f) => Bind (Effectable f)
 
     instance foldableEffectable :: (Applicative f, Foldable f) => Foldable (Effectable f)
 
-    instance functorChannel :: (Functor f) => Functor (Channel a a' b b' f)
+    instance functorChannel :: (Functor f) => Functor (Channel i o f)
 
     instance functorEffectable :: (Functor f) => Functor (Effectable f)
 
-    instance lazy1Channel :: Lazy1 (Channel a a' b b' f)
+    instance lazy1Channel :: Lazy1 (Channel i o f)
 
     instance lazy1Effectable :: Lazy1 (Effectable f)
 
-    instance monadChannel :: (Monad f) => Monad (Channel a a' b b' f)
+    instance monadChannel :: (Monad f) => Monad (Channel i o f)
 
     instance monadEffectable :: (Monad f) => Monad (Effectable f)
 
-    instance monadTransChannel :: MonadTrans (Channel a a' b b')
+    instance monadTransChannel :: MonadTrans (Channel i o)
 
     instance monadTransEffectable :: MonadTrans Effectable
 
-    instance monoidChannel :: (Applicative f, Monoid r) => Monoid (Channel a a b b f r)
+    instance monoidChannel :: (Applicative f, Monoid r) => Monoid (Channel io io f r)
 
     instance monoidEffectable :: (Applicative f, Monoid a) => Monoid (Effectable f a)
 
-    instance semigroupChannel :: (Applicative f, Semigroup r) => Semigroup (Channel a a b b f r)
+    instance semigroupChannel :: (Applicative f, Semigroup r) => Semigroup (Channel io io f r)
 
     instance semigroupEffectable :: (Applicative f, Semigroup a) => Semigroup (Effectable f a)
 
@@ -69,51 +93,55 @@
 
 ### Values
 
-    await :: forall a a' b b' f r. Effectable f r -> (Either a b -> Channel a a' b b' f r) -> Channel a a' b b' f r
+    await :: forall i o f r. Effectable f r -> (i -> Channel i o f r) -> Channel i o f r
 
-    awaitDown :: forall a a' b f r. (Applicative f) => Effectable f r -> (a -> Channel a a' b b f r) -> Channel a a' b b f r
+    compose :: forall f r b c d. (Applicative f, Semigroup r) => Channel c d f r -> Channel b c f r -> Channel b d f r
 
-    awaitUp :: forall a b b' f r. (Applicative f) => Effectable f r -> (b -> Channel a a b b' f r) -> Channel a a b b' f r
+    finalizer :: forall i o f r x. (Applicative f) => f x -> Channel i o f r -> Channel i o f r
 
-    finalizer :: forall a a' b b' f r x. (Applicative f) => f x -> Channel a a' b b' f r -> Channel a a' b b' f r
-
-    runChannel :: forall f r. (Monad f) => Workflow f r -> f r
+    loop :: forall i o f r. (Functor f) => Channel i o f r -> Channel i o f r
 
     runEffectable :: forall f a. (Applicative f) => Effectable f a -> f a
 
-    stack :: forall a a' a'' b b' b'' f r r'. (Applicative f) => Channel a a' b' b'' f r -> Channel a' a'' b b' f r' -> Channel a a'' b b'' f (Tuple r r')
+    runWorkflow :: forall f r. (Monad f) => Workflow f r -> f r
 
-    stop :: forall a a' b b' f r. r -> Channel a a' b b' f r
+    stop :: forall i o f r. r -> Channel i o f r
 
-    stop' :: forall a a' b b' f r. (Functor f) => f r -> Channel a a' b b' f r
+    stop' :: forall i o f r. (Functor f) => f r -> Channel i o f r
 
-    terminate :: forall a a' b b' f r. (Applicative f) => Channel a a' b b' f r -> Effectable f r
+    terminate :: forall i o f r. (Applicative f) => Channel i o f r -> Effectable f r
 
-    terminator :: forall a a' b b' f r. (Applicative f) => Effectable f r -> Channel a a' b b' f r -> Channel a a' b b' f r
+    terminator :: forall i o f r. (Applicative f) => Effectable f r -> Channel i o f r -> Channel i o f r
 
-    yield :: forall a a' b b' f r. (Applicative f) => Effectable f r -> Either a' b' -> Channel a a' b b' f r
+    yield :: forall i o f r. (Applicative f) => Effectable f r -> o -> Channel i o f r
 
-    yieldDown :: forall a a' b b' f r. (Applicative f) => Effectable f r -> a' -> Channel a a' b b' f r
-
-    yieldUp :: forall a a' b b' f r. (Applicative f) => Effectable f r -> b' -> Channel a a' b b' f r
+    yield' :: forall i o f r. (Applicative f) => Effectable f r -> f o -> Channel i o f r
 
 
-## Module Channels.Streams
+## Module Channels.Stream
 
 ### Types
 
-    newtype Downstream b f r a a' where
-      Downstream :: Channel a a' b b f r -> Downstream b f r a a'
+    newtype Stream f r i o where
+      Stream :: Channel i o f r -> Stream f r i o
 
-    newtype Upstream a f r b b' where
-      Upstream :: Channel a a b b' f r -> Upstream a f r b b'
+
+### Type Class Instances
+
+    instance categoryStream :: (Applicative f, Monoid r) => Category (Stream f r)
+
+    instance profunctorStream :: (Applicative f) => Profunctor (Stream f r)
+
+    instance semigroupoidStream :: (Applicative f, Semigroup r) => Semigroupoid (Stream f r)
 
 
 ### Values
 
-    unDownstream :: forall b f r a a'. Downstream b f r a a' -> Channel a a' b b f r
+    moore :: forall f r i o. (Applicative f, Monoid r) => (i -> o) -> Stream f r i o
 
-    unUpstream :: forall a f r b b'. Upstream a f r b b' -> Channel a a b b' f r
+    moore' :: forall f r i o. (Applicative f, Monoid r) => (i -> f o) -> Stream f r i o
+
+    unStream :: forall f r i o. Stream f r i o -> Channel i o f r
 
 
 
