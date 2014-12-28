@@ -5,7 +5,7 @@
 ### Types
 
     data Channel a a' b b' f r where
-      Emit :: Either a' b' -> Channel a a' b b' f r -> Effectable f r -> Channel a a' b b' f r
+      Yield :: Either a' b' -> Channel a a' b b' f r -> Effectable f r -> Channel a a' b b' f r
       Await :: (Either a b -> Channel a a' b b' f r) -> Effectable f r -> Channel a a' b b' f r
       ChanX :: f (Channel a a' b b' f r) -> Effectable f r -> Channel a a' b b' f r
       ChanZ :: Lazy (Channel a a' b b' f r) -> Channel a a' b b' f r
@@ -84,12 +84,6 @@
 
     awaitUp :: forall a b b' f r. (Applicative f) => Effectable f r -> (b -> Channel a a b b' f r) -> Channel a a b b' f r
 
-    emit :: forall a a' b b' f r. (Applicative f) => Effectable f r -> Either a' b' -> Channel a a' b b' f r
-
-    emitDown :: forall a a' b b' f r. (Applicative f) => Effectable f r -> a' -> Channel a a' b b' f r
-
-    emitUp :: forall a a' b b' f r. (Applicative f) => Effectable f r -> b' -> Channel a a' b b' f r
-
     finalizer :: forall a a' b b' f r x. (Applicative f) => f x -> Channel a a' b b' f r -> Channel a a' b b' f r
 
     runChannel :: forall f r. (Monad f) => Workflow f r -> f r
@@ -97,6 +91,10 @@
     runEffectable :: forall f a. (Applicative f) => Effectable f a -> f a
 
     stack :: forall a a' a'' b b' b'' f r r'. (Applicative f) => Channel a a' b' b'' f r -> Channel a' a'' b b' f r' -> Channel a a'' b b'' f (Tuple r r')
+
+    stop :: forall a a' b b' f r. r -> Channel a a' b b' f r
+
+    stop' :: forall a a' b b' f r. (Functor f) => f r -> Channel a a' b b' f r
 
     terminate :: forall a a' b b' f r. (Applicative f) => Channel a a' b b' f r -> Effectable f r
 
@@ -106,9 +104,11 @@
 
     unUpstream :: forall a f r b b'. Upstream a f r b b' -> Channel a a b b' f r
 
-    yield :: forall a a' b b' f r. r -> Channel a a' b b' f r
+    yield :: forall a a' b b' f r. (Applicative f) => Effectable f r -> Either a' b' -> Channel a a' b b' f r
 
-    yield' :: forall a a' b b' f r. (Functor f) => f r -> Channel a a' b b' f r
+    yieldDown :: forall a a' b b' f r. (Applicative f) => Effectable f r -> a' -> Channel a a' b b' f r
+
+    yieldUp :: forall a a' b b' f r. (Applicative f) => Effectable f r -> b' -> Channel a a' b b' f r
 
 
 
