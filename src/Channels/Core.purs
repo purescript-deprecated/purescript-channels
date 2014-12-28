@@ -8,6 +8,8 @@ module Channels.Core
   , compose
   , finalizer
   , loop
+  , moore
+  , moore'
   , runEffectable
   , runWorkflow
   , stop
@@ -56,6 +58,16 @@ module Channels.Core
   -- | A workflow consists of a channel which awaits and emits unit values.
   -- | Such a channel can be trivially run.
   type Workflow f r = Channel Unit Unit f r
+
+  -- | Lifts a pure function to a channel.
+  moore :: forall f r i o. (Applicative f, Monoid r) => (i -> o) -> Channel i o f r
+  moore f = loop (await q (f >>> yield q))
+    where q = pure mempty
+
+  -- | Lifts an effectful function to a channel.
+  moore' :: forall f r i o. (Applicative f, Monoid r) => (i -> f o) -> Channel i o f r
+  moore' f = loop (await q (f >>> yield' q))
+    where q = pure mempty
 
   -- | Pipes the output of one channel to the input of another.
   compose :: forall a b c f r. (Applicative f, Semigroup r) => Channel b c f r -> Channel a b f r -> Channel a c f r

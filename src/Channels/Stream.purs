@@ -1,7 +1,5 @@
 module Channels.Stream 
   ( Stream(..)
-  , moore
-  , moore'
   , unStream
   ) where
 
@@ -17,14 +15,6 @@ module Channels.Stream
 
   unStream :: forall f r i o. Stream f r i o -> Channel i o f r
   unStream (Stream c) = c
-
-  moore :: forall f r i o. (Applicative f, Monoid r) => (i -> o) -> Stream f r i o
-  moore f = Stream (loop (await q (f >>> yield q)))
-    where q = pure mempty
-
-  moore' :: forall f r i o. (Applicative f, Monoid r) => (i -> f o) -> Stream f r i o
-  moore' f = Stream (loop (await q (f >>> yield' q)))
-    where q = pure mempty
 
   instance semigroupoidStream :: (Applicative f, Semigroup r) => Semigroupoid (Stream f r) where
     (<<<) (Stream c1) (Stream c2) = Stream (compose c1 c2)

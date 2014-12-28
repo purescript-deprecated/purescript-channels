@@ -134,6 +134,10 @@
 
     loop :: forall i o f r. (Functor f) => Channel i o f r -> Channel i o f r
 
+    moore :: forall f r i o. (Applicative f, Monoid r) => (i -> o) -> Channel i o f r
+
+    moore' :: forall f r i o. (Applicative f, Monoid r) => (i -> f o) -> Channel i o f r
+
     runEffectable :: forall f a. (Applicative f) => Effectable f a -> f a
 
     runWorkflow :: forall f r. (Monad f) => Workflow f r -> f r
@@ -169,10 +173,6 @@
 
 
 ### Values
-
-    moore :: forall f r i o. (Applicative f, Monoid r) => (i -> o) -> Stream f r i o
-
-    moore' :: forall f r i o. (Applicative f, Monoid r) => (i -> f o) -> Stream f r i o
 
     unStream :: forall f r i o. Stream f r i o -> Channel i o f r
 
