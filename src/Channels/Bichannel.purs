@@ -132,7 +132,7 @@ module Channels.Bichannel
   instance profunctorUpstream :: (Applicative f) => Profunctor (Upstream a f r) where
     dimap f g (Upstream c) = Upstream (dimap' c)
       where dimap' (Yield e c q) = Yield (g <$> e) (dimap' c) q
-            -- dimap' (Await   h q) = Await (\e -> h (f <$> e)) q
+            dimap' (Await   h q) = Await (either Left (f >>> Right) >>> h >>> dimap') q
             dimap' (ChanX   x q) = ChanX (dimap' <$> x) q
             dimap' (ChanZ     z) = ChanZ (dimap' <$> z)
             dimap' (Stop      r) = Stop r
@@ -146,7 +146,7 @@ module Channels.Bichannel
   instance profunctorDownstream :: (Applicative f) => Profunctor (Downstream b f r) where
     dimap f g (Downstream c) = Downstream (dimap' c)
       where dimap' (Yield e c q) = Yield (either (g >>> Left) Right e) (dimap' c) q
-            -- dimap' (Await   h q) = Await (either (f >>> Left) Right >>> h) q
+            dimap' (Await   h q) = Await (either (f >>> Left) Right >>> h >>> dimap') q
             dimap' (ChanX   x q) = ChanX (dimap' <$> x) q
             dimap' (ChanZ     z) = ChanZ (dimap' <$> z)
             dimap' (Stop      r) = Stop r
