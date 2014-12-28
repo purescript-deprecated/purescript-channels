@@ -1,4 +1,26 @@
-module Channels.Core where 
+module Channels.Core
+  ( Effectable()
+  , Channel(..)
+  , Sink(..)
+  , Source(..)
+  , UniChannel(..)
+  , Workflow(..)
+  , await
+  , awaitDown
+  , awaitUp
+  , finalizer
+  , runChannel
+  , runEffectable
+  , stack
+  , stop
+  , stop'
+  , terminate
+  , terminator
+  , yield
+  , yieldDown
+  , yieldUp
+  ) where 
+
   import Data.Foldable(Foldable, foldl, foldr, foldMap)
   import Data.Traversable(Traversable, traverse, sequence)
   import Data.Monoid(Monoid, mempty)
@@ -31,11 +53,7 @@ module Channels.Core where
     | Await (Either a b -> Channel a a' b b' f r) (Effectable f r)
     | ChanX (f (Channel a a' b b' f r)) (Effectable f r)
     | ChanZ (Lazy (Channel a a' b b' f r))
-    | Stop r
-
-  newtype Upstream a f r b b' = Upstream (Channel a a b b' f r)
-
-  newtype Downstream b f r a a' = Downstream (Channel a a' b b f r)
+    | Stop r  
 
   type UniChannel a b f r = Channel a a b b f r
 
@@ -60,12 +78,6 @@ module Channels.Core where
   runEffectable (EffP a)  = pure a
   runEffectable (EffX fa) = fa
   runEffectable (EffZ ef) = runEffectable (force ef)
-
-  unUpstream :: forall a f r b b'. Upstream a f r b b' -> Channel a a b b' f r
-  unUpstream (Upstream c) = c
-
-  unDownstream :: forall b f r a a'. Downstream b f r a a' -> Channel a a' b b f r
-  unDownstream (Downstream c) = c
 
   -- | Using the specified terminator, awaits an upstream or downstream value.
   await :: forall a a' b b' f r. Effectable f r -> (Either a b -> Channel a a' b b' f r) -> Channel a a' b b' f r

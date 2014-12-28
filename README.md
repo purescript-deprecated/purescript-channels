@@ -11,22 +11,13 @@
       ChanZ :: Lazy (Channel a a' b b' f r) -> Channel a a' b b' f r
       Stop :: r -> Channel a a' b b' f r
 
-    newtype Downstream b f r a a' where
-      Downstream :: Channel a a' b b f r -> Downstream b f r a a'
-
-    data Effectable f a where
-      EffP :: a -> Effectable f a
-      EffX :: f a -> Effectable f a
-      EffZ :: Lazy (Effectable f a) -> Effectable f a
+    data Effectable f a
 
     type Sink f a b r = Channel a Unit Unit b f r
 
     type Source f a b r = Channel Unit a b Unit f r
 
     type UniChannel a b f r = Channel a a b b f r
-
-    newtype Upstream a f r b b' where
-      Upstream :: Channel a a b b' f r -> Upstream a f r b b'
 
     type Workflow f r = Channel Unit Unit Unit Unit f r
 
@@ -100,15 +91,29 @@
 
     terminator :: forall a a' b b' f r. (Applicative f) => Effectable f r -> Channel a a' b b' f r -> Channel a a' b b' f r
 
-    unDownstream :: forall b f r a a'. Downstream b f r a a' -> Channel a a' b b f r
-
-    unUpstream :: forall a f r b b'. Upstream a f r b b' -> Channel a a b b' f r
-
     yield :: forall a a' b b' f r. (Applicative f) => Effectable f r -> Either a' b' -> Channel a a' b b' f r
 
     yieldDown :: forall a a' b b' f r. (Applicative f) => Effectable f r -> a' -> Channel a a' b b' f r
 
     yieldUp :: forall a a' b b' f r. (Applicative f) => Effectable f r -> b' -> Channel a a' b b' f r
+
+
+## Module Channels.Streams
+
+### Types
+
+    newtype Downstream b f r a a' where
+      Downstream :: Channel a a' b b f r -> Downstream b f r a a'
+
+    newtype Upstream a f r b b' where
+      Upstream :: Channel a a b b' f r -> Upstream a f r b b'
+
+
+### Values
+
+    unDownstream :: forall b f r a a'. Downstream b f r a a' -> Channel a a' b b f r
+
+    unUpstream :: forall a f r b b'. Upstream a f r b b' -> Channel a a b b' f r
 
 
 
