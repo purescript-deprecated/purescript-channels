@@ -1,8 +1,11 @@
 module Channels.Core
-  ( Effectable()
-  , Channel(..)
+  ( Channel(..)
+  , Effectable()
+  , Sink(..)
+  , Source(..)
   , Workflow(..)
   , await
+  , compose
   , finalizer
   , loop
   , runEffectable
@@ -44,9 +47,27 @@ module Channels.Core
     | ChanZ (Lazy (Channel i o f r))
     | Stop r  
 
+  -- | A source of values, which awaits only unit.
+  type Source o f r = Channel Unit o f r
+
+  -- | A sink of values, which emits only unit.
+  type Sink i f r = Channel i Unit f r
+
   -- | A workflow consists of a channel which awaits and emits unit values.
   -- | Such a channel can be trivially run.
   type Workflow f r = Channel Unit Unit f r
+
+  -- | Pipes the output of one channel to the input of another.
+  compose :: forall a b c f r. (Applicative f, Semigroup r) => Channel b c f r -> Channel a b f r -> Channel a c f r
+  compose c1 (Await f2 q2)    = Await (compose c1 <$> f2) (q2 <> terminate c1)
+  compose (Yield o c1 q1) c2  = Yield o (c1 `compose` c2) (terminate c2 <> q1)
+  compose c1 (ChanX fc2 q2)   = ChanX (compose c1 <$> fc2) (q2 <> terminate c1)
+  compose c1 (ChanZ zc2)      = ChanZ (compose c1 <$> zc2)
+  compose (ChanX fc1 q1) c2   = ChanX (flip compose c2 <$> fc1) (terminate c2 <> q1)
+  compose (ChanZ zc1) c2      = ChanZ (flip compose c2 <$> zc1)
+  compose (Stop r1) c2        = stop' (flip (<>) r1 <$> runEffectable (terminate c2))
+  compose c1 (Stop r2)        = stop' ((<>) r2 <$> runEffectable (terminate c1))
+  compose (Await f1 _) (Yield o c2 _) = defer1 \_ -> f1 o `compose` c2
 
   runEffectable :: forall f a. (Applicative f) => Effectable f a -> f a
   runEffectable (EffP  a) = pure a

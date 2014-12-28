@@ -72,6 +72,10 @@
 
     data Effectable f a
 
+    type Sink i f r = Channel i Unit f r
+
+    type Source o f r = Channel Unit o f r
+
     type Workflow f r = Channel Unit Unit f r
 
 
@@ -123,6 +127,8 @@
 ### Values
 
     await :: forall i o f r. Effectable f r -> (i -> Channel i o f r) -> Channel i o f r
+
+    compose :: forall a b c f r. (Applicative f, Semigroup r) => Channel b c f r -> Channel a b f r -> Channel a c f r
 
     finalizer :: forall i o f r x. (Applicative f) => f x -> Channel i o f r -> Channel i o f r
 
