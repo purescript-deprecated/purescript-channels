@@ -12,6 +12,27 @@
 
     type Biworkflow f r = Bichannel Unit Unit Unit Unit f r
 
+    newtype Downstream b f r a a' where
+      Downstream :: Bichannel a a' b b f r -> Downstream b f r a a'
+
+    newtype Upstream a f r b b' where
+      Upstream :: Bichannel a a b b' f r -> Upstream a f r b b'
+
+
+### Type Class Instances
+
+    instance categoryDownstream :: (Applicative f, Monoid r) => Category (Downstream b f r)
+
+    instance categoryUpstream :: (Applicative f, Monoid r) => Category (Upstream a f r)
+
+    instance profunctorDownstream :: (Applicative f) => Profunctor (Downstream b f r)
+
+    instance profunctorUpstream :: (Applicative f) => Profunctor (Upstream a f r)
+
+    instance semigroupoidDownstream :: (Applicative f, Semigroup r) => Semigroupoid (Downstream b f r)
+
+    instance semigroupoidUpstream :: (Applicative f, Semigroup r) => Semigroupoid (Upstream a f r)
+
 
 ### Values
 
@@ -23,7 +44,15 @@
 
     stack :: forall a a' a'' b b' b'' f r r'. (Applicative f) => Bichannel a a' b' b'' f r -> Bichannel a' a'' b b' f r' -> Bichannel a a'' b b'' f (Tuple r r')
 
+    toDownstream :: forall b f r a a'. (Functor f) => Stream f r a a' -> Downstream b f r a a'
+
+    toUpstream :: forall a f r b b'. (Functor f) => Stream f r b b' -> Upstream a f r b b'
+
     toWorkflow :: forall f r. (Applicative f) => Biworkflow f r -> Workflow f r
+
+    unDownstream :: forall b f r a a'. Downstream b f r a a' -> Bichannel a a' b b f r
+
+    unUpstream :: forall a f r b b'. Upstream a f r b b' -> Bichannel a a b b' f r
 
     yieldDown :: forall a a' b b' f r. (Applicative f) => Effectable f r -> a' -> Bichannel a a' b b' f r
 
@@ -94,8 +123,6 @@
 ### Values
 
     await :: forall i o f r. Effectable f r -> (i -> Channel i o f r) -> Channel i o f r
-
-    compose :: forall f r b c d. (Applicative f, Semigroup r) => Channel c d f r -> Channel b c f r -> Channel b d f r
 
     finalizer :: forall i o f r x. (Applicative f) => f x -> Channel i o f r -> Channel i o f r
 

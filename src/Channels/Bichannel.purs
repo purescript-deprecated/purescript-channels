@@ -3,20 +3,26 @@ module Channels.Bichannel
   , Bisink(..)
   , Bisource(..)
   , Biworkflow(..)
+  , Downstream(..)
+  , Upstream(..)
   , awaitDown
   , awaitUp
   , runBiworkflow
   , stack
   , toWorkflow
+  , toDownstream
+  , toUpstream
+  , unDownstream
+  , unUpstream
   , yieldDown
   , yieldUp
   ) where 
 
-  import Data.Either(Either(..))
+  import Data.Either(Either(..), either)
   import Data.Tuple(Tuple(..))
   import Data.Lazy(Lazy(..), force)
   import Data.Monoid
-  import Data.Profunctor(dimap)
+  import Data.Profunctor(Profunctor, dimap)
   import Control.Lazy(defer1)
 
   import Channels.Core
@@ -39,6 +45,35 @@ module Channels.Bichannel
   type Bisink f a b r = Bichannel a Unit Unit b f r
 
   type Biworkflow f r = Bichannel Unit Unit Unit Unit f r
+
+  newtype Upstream a f r b b' = Upstream (Bichannel a a b b' f r)
+
+  newtype Downstream b f r a a' = Downstream (Bichannel a a' b b f r)
+
+  unUpstream :: forall a f r b b'. Upstream a f r b b' -> Bichannel a a b b' f r
+  unUpstream (Upstream c) = c
+
+  unDownstream :: forall b f r a a'. Downstream b f r a a' -> Bichannel a a' b b f r
+  unDownstream (Downstream c) = c
+
+  toUpstream :: forall a f r b b'. (Functor f) => Stream f r b b' -> Upstream a f r b b'
+  toUpstream (Stream c) = Upstream (loop' c)
+    where loop' (Yield o c q) = Yield (Right o) (loop' c) q
+          loop' c0 @ (Await h q) = Await (either (\a -> Yield (Left a) (loop' c0) q) (\b -> loop' (h b))) q
+          loop' (ChanX   x q) = ChanX (loop' <$> x) q
+          loop' (ChanZ     z) = ChanZ (loop' <$> z)
+          loop' (Stop      r) = Stop r
+
+  toDownstream :: forall b f r a a'. (Functor f) => Stream f r a a' -> Downstream b f r a a'
+  toDownstream (Stream c) = Downstream (loop' c)
+    where loop' (Yield o c q) = Yield (Left o) (loop' c) q
+          loop' c0 @ (Await h q) = Await (either (\a -> loop' (h a)) (\b -> Yield (Right b) (loop' c0) q)) q
+          loop' (ChanX   x q) = ChanX (loop' <$> x) q
+          loop' (ChanZ     z) = ChanZ (loop' <$> z)
+          loop' (Stop      r) = Stop r
+
+  reflect :: forall a a' b b' f r. (Applicative f) => Bichannel a a' b b' f r -> Bichannel b b' a a' f r
+  reflect c = unStream (dimap (either Right Left) (either Right Left) (Stream c))
 
   -- | Using the specified terminator, awaits a downstream value and passes 
   -- | through all upstream values.
@@ -87,3 +122,31 @@ module Channels.Bichannel
 
   runBiworkflow :: forall f r. (Monad f) => Biworkflow f r -> f r
   runBiworkflow = toWorkflow >>> runWorkflow
+
+  instance semigroupoidUpstream :: (Applicative f, Semigroup r) => Semigroupoid (Upstream a f r) where
+    (<<<) (Upstream c1) (Upstream c2) = Upstream $ (\(Tuple r r') -> r <> r') <$> (c1 `stack` c2)
+
+  instance categoryUpstream :: (Applicative f, Monoid r) => Category (Upstream a f r) where
+    id = toUpstream id
+
+  instance profunctorUpstream :: (Applicative f) => Profunctor (Upstream a f r) where
+    dimap f g (Upstream c) = Upstream (dimap' c)
+      where dimap' (Yield e c q) = Yield (g <$> e) (dimap' c) q
+            -- dimap' (Await   h q) = Await (\e -> h (f <$> e)) q
+            dimap' (ChanX   x q) = ChanX (dimap' <$> x) q
+            dimap' (ChanZ     z) = ChanZ (dimap' <$> z)
+            dimap' (Stop      r) = Stop r
+
+  instance semigroupoidDownstream :: (Applicative f, Semigroup r) => Semigroupoid (Downstream b f r) where
+    (<<<) (Downstream c1) (Downstream c2) = Downstream $ (\(Tuple r r') -> r' <> r) <$> (c2 `stack` c1)
+
+  instance categoryDownstream :: (Applicative f, Monoid r) => Category (Downstream b f r) where
+    id = toDownstream id
+
+  instance profunctorDownstream :: (Applicative f) => Profunctor (Downstream b f r) where
+    dimap f g (Downstream c) = Downstream (dimap' c)
+      where dimap' (Yield e c q) = Yield (either (g >>> Left) Right e) (dimap' c) q
+            -- dimap' (Await   h q) = Await (either (f >>> Left) Right >>> h) q
+            dimap' (ChanX   x q) = ChanX (dimap' <$> x) q
+            dimap' (ChanZ     z) = ChanZ (dimap' <$> z)
+            dimap' (Stop      r) = Stop r
