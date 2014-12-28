@@ -121,7 +121,7 @@ module Channels.Core where
   -- | 
   -- | Laziness is introduced when the two channels pass messages between each
   -- | other. This allows channels to be stacked even when all they do is 
-  -- | forever pass each other messages.
+  -- | forever pass each other messages (e.g. stacking a source on a sink).
   stack :: forall a a' a'' b b' b'' f r r'. (Applicative f) => Channel a a' b' b'' f r -> Channel a' a'' b b' f r' -> Channel a a'' b b'' f (Tuple r r')
   stack (Emit (Right b'') c1 q1) c2 = Emit (Right b'') (c1 `stack` c2)  (defer1 \_ -> (Tuple <$> q1 <*> terminate c2))
   stack c1 (Emit (Left a'') c2 q2)  = Emit (Left a'') (c1 `stack` c2)   (defer1 \_ -> (Tuple <$> terminate c1 <*> q2))
