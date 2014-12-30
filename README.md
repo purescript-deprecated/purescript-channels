@@ -12,27 +12,6 @@
 
     type Biworkflow f r = Bichannel Unit Unit Unit Unit f r
 
-    newtype Downstream b f r a a' where
-      Downstream :: Bichannel a a' b b f r -> Downstream b f r a a'
-
-    newtype Upstream a f r b b' where
-      Upstream :: Bichannel a a b b' f r -> Upstream a f r b b'
-
-
-### Type Class Instances
-
-    instance categoryDownstream :: (Applicative f, Monoid r) => Category (Downstream b f r)
-
-    instance categoryUpstream :: (Applicative f, Monoid r) => Category (Upstream a f r)
-
-    instance profunctorDownstream :: (Applicative f) => Profunctor (Downstream b f r)
-
-    instance profunctorUpstream :: (Applicative f) => Profunctor (Upstream a f r)
-
-    instance semigroupoidDownstream :: (Applicative f, Semigroup r) => Semigroupoid (Downstream b f r)
-
-    instance semigroupoidUpstream :: (Applicative f, Semigroup r) => Semigroupoid (Upstream a f r)
-
 
 ### Values
 
@@ -44,19 +23,22 @@
 
     stack :: forall a a' a'' b b' b'' f r r'. (Applicative f) => Bichannel a a' b' b'' f r -> Bichannel a' a'' b b' f r' -> Bichannel a a'' b b'' f (Tuple r r')
 
-    toDownstream :: forall b f r a a'. (Functor f) => Stream f r a a' -> Downstream b f r a a'
+    toDownstream :: forall b f r a a'. (Functor f) => Channel a a' f r -> Bichannel a a' b b f r
 
-    toUpstream :: forall a f r b b'. (Functor f) => Stream f r b b' -> Upstream a f r b b'
+    toUpstream :: forall a f r b b'. (Functor f) => Channel b b' f r -> Bichannel a a b b' f r
 
     toWorkflow :: forall f r. (Applicative f) => Biworkflow f r -> Workflow f r
-
-    unDownstream :: forall b f r a a'. Downstream b f r a a' -> Bichannel a a' b b f r
-
-    unUpstream :: forall a f r b b'. Upstream a f r b b' -> Bichannel a a b b' f r
 
     yieldDown :: forall a a' b b' f r. (Applicative f) => Effectable f r -> a' -> Bichannel a a' b b' f r
 
     yieldUp :: forall a a' b b' f r. (Applicative f) => Effectable f r -> b' -> Bichannel a a' b b' f r
+
+
+## Module Channels.Combinators
+
+### Values
+
+    yieldAll :: forall i o f c. (Applicative f, Foldable c) => c o -> Channel i o f [o]
 
 
 ## Module Channels.Core
@@ -150,9 +132,20 @@
 
     terminator :: forall i o f r. (Applicative f) => Effectable f r -> Channel i o f r -> Channel i o f r
 
+    wrapEffect :: forall i o f r. (Monad f) => f (Channel i o f r) -> Channel i o f r
+
     yield :: forall i o f r. (Applicative f) => Effectable f r -> o -> Channel i o f r
 
     yield' :: forall i o f r. (Applicative f) => Effectable f r -> f o -> Channel i o f r
+
+
+## Module Channels.State
+
+### Values
+
+    stateMachine :: forall s i o f. (Applicative f) => (s -> i -> Tuple s [o]) -> s -> Channel i o f s
+
+    stateMachine' :: forall s i o f. (Monad f) => (s -> i -> f (Tuple s [o])) -> s -> Channel i o f s
 
 
 ## Module Channels.Stream

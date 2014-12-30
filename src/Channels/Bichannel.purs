@@ -3,8 +3,6 @@ module Channels.Bichannel
   , Bisink(..)
   , Bisource(..)
   , Biworkflow(..)
-  , Downstream(..)
-  , Upstream(..)
   , awaitDown
   , awaitUp
   , runBiworkflow
@@ -12,8 +10,6 @@ module Channels.Bichannel
   , toWorkflow
   , toDownstream
   , toUpstream
-  , unDownstream
-  , unUpstream
   , yieldDown
   , yieldUp
   ) where 
@@ -46,23 +42,9 @@ module Channels.Bichannel
 
   type Biworkflow f r = Bichannel Unit Unit Unit Unit f r
 
-  -- | An upstream bichannel does not modify the type of the downstream channel.
-  -- | Upstream bichannels form a semigroupoid, category, and profunctor.
-  newtype Upstream a f r b b' = Upstream (Bichannel a a b b' f r)
-
-  -- | A downstream bichannel does not modify the type of the upstream channel.
-  -- | Downstream bichannels form a semigroupoid, category, and profunctor.
-  newtype Downstream b f r a a' = Downstream (Bichannel a a' b b f r)
-
-  unUpstream :: forall a f r b b'. Upstream a f r b b' -> Bichannel a a b b' f r
-  unUpstream (Upstream c) = c
-
-  unDownstream :: forall b f r a a'. Downstream b f r a a' -> Bichannel a a' b b f r
-  unDownstream (Downstream c) = c
-
   -- | Converts a stream to an upstream bichannel.
-  toUpstream :: forall a f r b b'. (Functor f) => Stream f r b b' -> Upstream a f r b b'
-  toUpstream (Stream c) = Upstream (loop' c)
+  toUpstream :: forall a f r b b'. (Functor f) => Channel b b' f r -> Bichannel a a b b' f r
+  toUpstream c = loop' c
     where loop' (Yield o c q) = Yield (Right o) (loop' c) q
           loop' c0 @ (Await h q) = Await (either (\a -> Yield (Left a) (loop' c0) q) (\b -> loop' (h b))) q
           loop' (ChanX   x q) = ChanX (loop' <$> x) q
@@ -70,8 +52,8 @@ module Channels.Bichannel
           loop' (Stop      r) = Stop r
 
   -- | Converts a stream to a downstream bichannel.
-  toDownstream :: forall b f r a a'. (Functor f) => Stream f r a a' -> Downstream b f r a a'
-  toDownstream (Stream c) = Downstream (loop' c)
+  toDownstream :: forall b f r a a'. (Functor f) => Channel a a' f r -> Bichannel a a' b b f r
+  toDownstream c = loop' c
     where loop' (Yield o c q) = Yield (Left o) (loop' c) q
           loop' c0 @ (Await h q) = Await (either (\a -> loop' (h a)) (\b -> Yield (Right b) (loop' c0) q)) q
           loop' (ChanX   x q) = ChanX (loop' <$> x) q
@@ -131,31 +113,3 @@ module Channels.Bichannel
   -- | Runs a biworkflow.
   runBiworkflow :: forall f r. (Monad f) => Biworkflow f r -> f r
   runBiworkflow = toWorkflow >>> runWorkflow
-
-  instance semigroupoidUpstream :: (Applicative f, Semigroup r) => Semigroupoid (Upstream a f r) where
-    (<<<) (Upstream c1) (Upstream c2) = Upstream $ (\(Tuple r r') -> r <> r') <$> (c1 `stack` c2)
-
-  instance categoryUpstream :: (Applicative f, Monoid r) => Category (Upstream a f r) where
-    id = toUpstream id
-
-  instance profunctorUpstream :: (Applicative f) => Profunctor (Upstream a f r) where
-    dimap f g (Upstream c) = Upstream (dimap' c)
-      where dimap' (Yield e c q) = Yield (g <$> e) (dimap' c) q
-            dimap' (Await   h q) = Await (either Left (f >>> Right) >>> h >>> dimap') q
-            dimap' (ChanX   x q) = ChanX (dimap' <$> x) q
-            dimap' (ChanZ     z) = ChanZ (dimap' <$> z)
-            dimap' (Stop      r) = Stop r
-
-  instance semigroupoidDownstream :: (Applicative f, Semigroup r) => Semigroupoid (Downstream b f r) where
-    (<<<) (Downstream c1) (Downstream c2) = Downstream $ (\(Tuple r r') -> r' <> r) <$> (c2 `stack` c1)
-
-  instance categoryDownstream :: (Applicative f, Monoid r) => Category (Downstream b f r) where
-    id = toDownstream id
-
-  instance profunctorDownstream :: (Applicative f) => Profunctor (Downstream b f r) where
-    dimap f g (Downstream c) = Downstream (dimap' c)
-      where dimap' (Yield e c q) = Yield (either (g >>> Left) Right e) (dimap' c) q
-            dimap' (Await   h q) = Await (either (f >>> Left) Right >>> h >>> dimap') q
-            dimap' (ChanX   x q) = ChanX (dimap' <$> x) q
-            dimap' (ChanZ     z) = ChanZ (dimap' <$> z)
-            dimap' (Stop      r) = Stop r

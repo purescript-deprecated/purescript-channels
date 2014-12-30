@@ -16,12 +16,15 @@ module Channels.Core
   , stop'
   , terminate
   , terminator
+  , wrapEffect
   , yield
   , yield'
   ) where 
 
+  import Data.Array((!!))
   import Data.Foldable(Foldable, foldl, foldr, foldMap)
   import Data.Traversable(Traversable, traverse, sequence)
+  import Data.Maybe(maybe)
   import Data.Monoid(Monoid, mempty)
   import Data.Tuple(Tuple(..))
   import Data.Lazy(Lazy(..), force, defer)
@@ -69,6 +72,16 @@ module Channels.Core
   moore' f = loop (await q (f >>> yield' q))
     where q = pure mempty
 
+  arraySource :: forall f o. (Monad f) => [o] -> Source o f Number
+  arraySource a = loop 0
+    where loop i = maybe (stop i) (cont i) (a !! i)
+          cont i e = do yield (pure i) e
+                        loop (i + 1)
+
+  arraySink :: forall f i. (Monad f) => Sink i f [i]
+  arraySink = loop [] 
+    where loop a = await (pure a) \i -> loop (a <> [i]) -- TODO: List then convert to Array!!!
+
   -- | Pipes the output of one channel to the input of another.
   compose :: forall a b c f r. (Applicative f, Semigroup r) => Channel b c f r -> Channel a b f r -> Channel a c f r
   compose c1 (Await f2 q2)    = Await (compose c1 <$> f2) (q2 <> terminate c1)
@@ -81,6 +94,8 @@ module Channels.Core
   compose c1 (Stop r2)        = stop' ((<>) r2 <$> runEffectable (terminate c1))
   compose (Await f1 _) (Yield o c2 _) = defer1 \_ -> f1 o `compose` c2
 
+  -- | Runs an effectable to produce an `f a`. The requirement for 
+  -- | `Applicative` could be loosened if the return value were Either a (f a).
   runEffectable :: forall f a. (Applicative f) => Effectable f a -> f a
   runEffectable (EffP  a) = pure a
   runEffectable (EffX fa) = fa
@@ -94,6 +109,9 @@ module Channels.Core
   runWorkflow (ChanZ     z) = runWorkflow (force z)
   runWorkflow (Stop      r) = pure r
 
+  -- | Returns a new channel that will restart when it reaches the end. 
+  -- | Although the channel will never voluntarily terminate, it may still be
+  -- | forcibly terminated.
   loop :: forall i o f r. (Functor f) => Channel i o f r -> Channel i o f r
   loop c0 = loop' c0
     where loop' (Yield o c q) = Yield o (loop' c) q
@@ -122,6 +140,10 @@ module Channels.Core
   stop' :: forall i o f r. (Functor f) => f r -> Channel i o f r
   stop' fr = (ChanX (stop <$> fr)) (EffX fr)
 
+  -- | Wraps an effect into the channel.
+  wrapEffect :: forall i o f r. (Monad f) => f (Channel i o f r) -> Channel i o f r
+  wrapEffect fc = ChanX fc (lift (fc >>= (terminate >>> runEffectable)))
+
   -- | Forcibly terminates a channel (unless the channel has already 
   -- | voluntarily terminated).
   terminate :: forall i o f r. (Applicative f) => Channel i o f r -> Effectable f r
@@ -132,14 +154,15 @@ module Channels.Core
   terminate (Stop      r) = EffP r
 
   -- | Replaces the value that the channel will produce if forcibly terminated.
+  -- | Preserves any effects associated with the old terminator.
   terminator :: forall i o f r. (Applicative f) => Effectable f r -> Channel i o f r -> Channel i o f r
-  terminator q = loop
+  terminator q2 = loop
     where
-      loop (Yield o c _) = Yield o (loop c) q
-      loop (Await   f _) = Await (loop <$> f) q
-      loop (ChanX   x _) = ChanX (loop <$> x) q
-      loop (ChanZ     z) = ChanZ (loop <$> z)
-      loop (Stop      r) = Stop r
+      loop (Yield o c q1) = Yield o (loop c) (q1 *> q2)
+      loop (Await   f q1) = Await (loop <$> f) (q1 *> q2)
+      loop (ChanX   x q1) = ChanX (loop <$> x) (q1 *> q2)
+      loop (ChanZ      z) = ChanZ (loop <$> z)
+      loop (Stop       r) = Stop r
 
   -- | Attaches the specified finalizer to the channel. The finalizer will be
   -- | called when the channel is forcibly terminated or when it voluntarily 
