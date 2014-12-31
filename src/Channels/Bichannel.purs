@@ -29,17 +29,14 @@ module Channels.Bichannel
   type Bichannel a a' b b' f r = Channel (Either a b) (Either a' b') f r
   
   -- | A bisource, defined as a bichannel that never emits upstream values or 
-  -- | awaits downstream values. Since we can't enforce that using the type 
-  -- | system, we loosen the definition to a bichannel that emits unit for 
-  -- | upstream and awaits unit from downstream.
+  -- | awaits downstream values.
   type Bisource f a' b r = Bichannel Z a' b Z f r
 
   -- | A bisink, defined as a bichannel that never emits downstream values or 
-  -- | awaits upstream values. Since we can't enforce that using the type 
-  -- | system, we loosen the definition to a bichannel that emits unit for
-  -- | downstream and awaits unit from upstream.
+  -- | awaits upstream values. 
   type Bisink f a b' r = Bichannel a Z b' Z f r
 
+  -- | A biworkflow, which never awaits or emits upstream or downstream values.
   type Biworkflow f r = Bichannel Z Z Z Z f r
 
   -- | Converts a stream to an upstream bichannel.

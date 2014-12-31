@@ -56,8 +56,7 @@ module Channels.Core
     | ChanZ (Lazy (Channel i o f r))
     | Stop r  
 
-  -- | A source of values, which awaits any type of value (and which therefore
-  -- | cannot do anything with those values).
+  -- | A source of values, which awaits nothing.
   type Source o f r = Channel Z o f r
 
   -- | A sink of values, which emits nothing.
@@ -66,7 +65,7 @@ module Channels.Core
   -- | A workflow consists of a source composed with a sink.
   type Workflow f r = Channel Z Z f r
 
-  foreign import unsafeZ :: Z
+  foreign import unsafeZ "val unsafeZ = undefined;" :: Z
 
   -- | Lifts a pure function to a channel.
   moore :: forall f r i o. (Applicative f, Monoid r) => (i -> o) -> Channel i o f r
