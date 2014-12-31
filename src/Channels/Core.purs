@@ -4,8 +4,10 @@ module Channels.Core
   , Sink(..)
   , Source(..)
   , Workflow(..)
+  , Z()
   , await
   , compose
+  , effect
   , finalizer
   , loop
   , moore
@@ -33,6 +35,8 @@ module Channels.Core
   import Control.Monad.Trans(MonadTrans, lift)
   import Control.Apply
 
+  foreign import data Z :: *
+
   -- | A value whose optionally lazy computation may or may not require an effect `f`.
   -- | This exists mainly for performance reasons, as always associating all values
   -- | with lazily computed effects adds several layers of indirection.
@@ -52,15 +56,17 @@ module Channels.Core
     | ChanZ (Lazy (Channel i o f r))
     | Stop r  
 
-  -- | A source of values, which awaits only unit.
-  type Source o f r = Channel Unit o f r
+  -- | A source of values, which awaits any type of value (and which therefore
+  -- | cannot do anything with those values).
+  type Source o f r = Channel Z o f r
 
-  -- | A sink of values, which emits only unit.
-  type Sink i f r = Channel i Unit f r
+  -- | A sink of values, which emits nothing.
+  type Sink i f r = Channel i Z f r
 
-  -- | A workflow consists of a channel which awaits and emits unit values.
-  -- | Such a channel can be trivially run.
-  type Workflow f r = Channel Unit Unit f r
+  -- | A workflow consists of a source composed with a sink.
+  type Workflow f r = Channel Z Z f r
+
+  foreign import unsafeZ :: Z
 
   -- | Lifts a pure function to a channel.
   moore :: forall f r i o. (Applicative f, Monoid r) => (i -> o) -> Channel i o f r
@@ -103,11 +109,12 @@ module Channels.Core
 
   -- | Runs a workflow to completion. TODO: stack overflow.
   runWorkflow :: forall f r. (Monad f) => Workflow f r -> f r
-  runWorkflow (Yield _ c _) = runWorkflow c
-  runWorkflow (Await   f _) = runWorkflow (f unit)
-  runWorkflow (ChanX   x _) = x >>= runWorkflow
-  runWorkflow (ChanZ     z) = runWorkflow (force z)
-  runWorkflow (Stop      r) = pure r
+  runWorkflow w = loop w
+    where loop (Yield _ c _) = loop c
+          loop (Await   f _) = loop (f unsafeZ)
+          loop (ChanX   x _) = x >>= loop
+          loop (ChanZ     z) = loop (force z)
+          loop (Stop      r) = pure r
 
   -- | Returns a new channel that will restart when it reaches the end. 
   -- | Although the channel will never voluntarily terminate, it may still be
@@ -139,6 +146,9 @@ module Channels.Core
   -- | Produces a channel that stops the channel with the effectful value `f r`.
   stop' :: forall i o f r. (Functor f) => f r -> Channel i o f r
   stop' fr = (ChanX (stop <$> fr)) (EffX fr)
+
+  effect :: forall i o f r x. (Applicative f) => Effectable f r -> f x -> Channel i o f r
+  effect q fx = stop' (fx *> runEffectable q)
 
   -- | Wraps an effect into the channel.
   wrapEffect :: forall i o f r. (Monad f) => f (Channel i o f r) -> Channel i o f r

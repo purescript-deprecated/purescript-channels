@@ -6,11 +6,11 @@
 
     type Bichannel a a' b b' f r = Channel (Either a b) (Either a' b') f r
 
-    type Bisink f a b r = Bichannel a Unit Unit b f r
+    type Bisink f a b' r = Bichannel a Z b' Z f r
 
-    type Bisource f a b r = Bichannel Unit a b Unit f r
+    type Bisource f a' b r = Bichannel Z a' b Z f r
 
-    type Biworkflow f r = Bichannel Unit Unit Unit Unit f r
+    type Biworkflow f r = Bichannel Z Z Z Z f r
 
 
 ### Values
@@ -54,11 +54,13 @@
 
     data Effectable f a
 
-    type Sink i f r = Channel i Unit f r
+    type Sink i f r = Channel i Z f r
 
-    type Source o f r = Channel Unit o f r
+    type Source o f r = Channel Z o f r
 
-    type Workflow f r = Channel Unit Unit f r
+    type Workflow f r = Channel Z Z f r
+
+    data Z :: *
 
 
 ### Type Class Instances
@@ -111,6 +113,8 @@
     await :: forall i o f r. Effectable f r -> (i -> Channel i o f r) -> Channel i o f r
 
     compose :: forall a b c f r. (Applicative f, Semigroup r) => Channel b c f r -> Channel a b f r -> Channel a c f r
+
+    effect :: forall i o f r x. (Applicative f) => Effectable f r -> f x -> Channel i o f r
 
     finalizer :: forall i o f r x. (Applicative f) => f x -> Channel i o f r -> Channel i o f r
 

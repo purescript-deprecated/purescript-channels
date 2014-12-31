@@ -32,15 +32,15 @@ module Channels.Bichannel
   -- | awaits downstream values. Since we can't enforce that using the type 
   -- | system, we loosen the definition to a bichannel that emits unit for 
   -- | upstream and awaits unit from downstream.
-  type Bisource f a b r = Bichannel Unit a b Unit f r
+  type Bisource f a' b r = Bichannel Z a' b Z f r
 
   -- | A bisink, defined as a bichannel that never emits downstream values or 
   -- | awaits upstream values. Since we can't enforce that using the type 
   -- | system, we loosen the definition to a bichannel that emits unit for
   -- | downstream and awaits unit from upstream.
-  type Bisink f a b r = Bichannel a Unit Unit b f r
+  type Bisink f a b' r = Bichannel a Z b' Z f r
 
-  type Biworkflow f r = Bichannel Unit Unit Unit Unit f r
+  type Biworkflow f r = Bichannel Z Z Z Z f r
 
   -- | Converts a stream to an upstream bichannel.
   toUpstream :: forall a f r b b'. (Functor f) => Channel b b' f r -> Bichannel a a b b' f r
@@ -108,8 +108,12 @@ module Channels.Bichannel
 
   -- | Converts a biworkflow to a workflow.
   toWorkflow :: forall f r. (Applicative f) => Biworkflow f r -> Workflow f r
-  toWorkflow c = unStream (dimap Left (const unit) (Stream c))
+  toWorkflow c = unStream (dimap unsafeCoerce unsafeCoerce (Stream c))
 
   -- | Runs a biworkflow.
   runBiworkflow :: forall f r. (Monad f) => Biworkflow f r -> f r
   runBiworkflow = toWorkflow >>> runWorkflow
+
+  -- This function will never be invoked because sinks are prevented by their 
+  -- type signature from emitting values and sources are prevented from using them.
+  foreign import unsafeCoerce "function(a){return a;}" :: forall a b. a -> b 
