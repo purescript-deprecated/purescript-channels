@@ -127,10 +127,12 @@ module Channels.Core
           loop' (ChanZ     z) = ChanZ (loop' <$> z)
           loop' (Stop      _) = c0
 
-  -- | Using the specified terminator, awaits a value.
+  -- | Using the specified terminator, awaits a value and monadically returns it.
   await' :: forall i o f. Effectable f i -> Channel i o f i
   await' q = Await stop q
 
+  -- | Using the specified terminator, awaits a value and passes it to the 
+  -- | specified handler.
   await :: forall i o f r. Effectable f r -> (i -> Channel i o f r) -> Channel i o f r
   await q f = Await f q
 
