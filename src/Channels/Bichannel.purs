@@ -4,7 +4,9 @@ module Channels.Bichannel
   , Bisource(..)
   , Biworkflow(..)
   , awaitDown
+  , awaitDown'
   , awaitUp
+  , awaitUp'
   , runBiworkflow
   , stack
   , toWorkflow
@@ -62,6 +64,16 @@ module Channels.Bichannel
   reflect c = unStream (dimap (either Right Left) (either Right Left) (Stream c))
 
   -- | Using the specified terminator, awaits a downstream value and passes 
+  -- | through all upstream values.
+  awaitDown' :: forall a a' b f. (Monad f) => Effectable f a -> Bichannel a a' b b f a
+  awaitDown' q = await' (Left <$> q) >>= either stop (yieldUp q)
+
+  -- | Using the specified terminator, awaits an upstream value and passes 
+  -- | through all downstream values.
+  awaitUp' :: forall a b b' f. (Monad f) => Effectable f b -> Bichannel a a b b' f b
+  awaitUp' q = await' (Right <$> q) >>= either (yieldDown q) stop
+
+    -- | Using the specified terminator, awaits a downstream value and passes 
   -- | through all upstream values.
   awaitDown :: forall a a' b f r. (Applicative f) => Effectable f r -> (a -> Bichannel a a' b b f r) -> Bichannel a a' b b f r
   awaitDown q f = await q g

@@ -17,7 +17,11 @@
 
     awaitDown :: forall a a' b f r. (Applicative f) => Effectable f r -> (a -> Bichannel a a' b b f r) -> Bichannel a a' b b f r
 
+    awaitDown' :: forall a a' b f. (Monad f) => Effectable f a -> Bichannel a a' b b f a
+
     awaitUp :: forall a b b' f r. (Applicative f) => Effectable f r -> (b -> Bichannel a a b b' f r) -> Bichannel a a b b' f r
+
+    awaitUp' :: forall a b b' f. (Monad f) => Effectable f b -> Bichannel a a b b' f b
 
     runBiworkflow :: forall f r. (Monad f) => Biworkflow f r -> f r
 
@@ -112,6 +116,8 @@
 
     await :: forall i o f r. Effectable f r -> (i -> Channel i o f r) -> Channel i o f r
 
+    await' :: forall i o f. Effectable f i -> Channel i o f i
+
     compose :: forall a b c f r. (Applicative f, Semigroup r) => Channel b c f r -> Channel a b f r -> Channel a c f r
 
     effect :: forall i o f r x. (Applicative f) => Effectable f r -> f x -> Channel i o f r
@@ -120,9 +126,9 @@
 
     loop :: forall i o f r. (Functor f) => Channel i o f r -> Channel i o f r
 
-    moore :: forall f r i o. (Applicative f, Monoid r) => (i -> o) -> Channel i o f r
+    moore :: forall i o f. (Applicative f) => (i -> o) -> Channel i o f Unit
 
-    moore' :: forall f r i o. (Applicative f, Monoid r) => (i -> f o) -> Channel i o f r
+    moore' :: forall i o f. (Applicative f) => (i -> f o) -> Channel i o f Unit
 
     runEffectable :: forall f a. (Applicative f) => Effectable f a -> f a
 

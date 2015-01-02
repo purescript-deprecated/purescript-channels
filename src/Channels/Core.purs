@@ -6,6 +6,7 @@ module Channels.Core
   , Workflow(..)
   , Z()
   , await
+  , await'
   , compose
   , effect
   , finalizer
@@ -68,14 +69,14 @@ module Channels.Core
   foreign import unsafeZ "val unsafeZ = undefined;" :: Z
 
   -- | Lifts a pure function to a channel.
-  moore :: forall f r i o. (Applicative f, Monoid r) => (i -> o) -> Channel i o f r
+  moore :: forall i o f. (Applicative f) => (i -> o) -> Channel i o f Unit
   moore f = loop (await q (f >>> yield q))
-    where q = pure mempty
+    where q = pure unit
 
   -- | Lifts an effectful function to a channel.
-  moore' :: forall f r i o. (Applicative f, Monoid r) => (i -> f o) -> Channel i o f r
+  moore' :: forall i o f. (Applicative f) => (i -> f o) -> Channel i o f Unit
   moore' f = loop (await q (f >>> yield' q))
-    where q = pure mempty
+    where q = pure unit
 
   arraySource :: forall f o. (Monad f) => [o] -> Source o f Number
   arraySource a = loop 0
@@ -127,6 +128,9 @@ module Channels.Core
           loop' (Stop      _) = c0
 
   -- | Using the specified terminator, awaits a value.
+  await' :: forall i o f. Effectable f i -> Channel i o f i
+  await' q = Await stop q
+
   await :: forall i o f r. Effectable f r -> (i -> Channel i o f r) -> Channel i o f r
   await q f = Await f q
 
@@ -146,6 +150,8 @@ module Channels.Core
   stop' :: forall i o f r. (Functor f) => f r -> Channel i o f r
   stop' fr = (ChanX (stop <$> fr)) (EffX fr)
 
+  -- | Using the specified terminator, performs an arbitrary effect and 
+  -- | discards the value of the effect. If you want the value, you can use stop' instead.
   effect :: forall i o f r x. (Applicative f) => Effectable f r -> f x -> Channel i o f r
   effect q fx = stop' (fx *> runEffectable q)
 
