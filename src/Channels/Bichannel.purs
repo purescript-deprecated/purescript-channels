@@ -91,16 +91,16 @@ module Channels.Bichannel
   -- | forever pass each other messages (e.g. stacking a source on a sink).
   stack :: forall a a' a'' b b' b'' f r r'. (Monad f) => Bichannel a a' b' b'' f r -> Bichannel a' a'' b b' f r' -> Bichannel a a'' b b'' f (Tuple (Maybe r) (Maybe r'))
   stack (Stop r1) c2                 = stop' (Tuple (Just r1) <$> runTerminator (terminate c2))
-  stack c1 (Stop r2)                 = stop' (flip Tuple (Just r2) <$> runTerminator (terminate c1))
+  stack c1 (Stop r2)                 = stop' (flip Tuple (Just r2) <$> terminateRun c1)
   stack (Yield (Right b'') c1 q1) c2 = 
-    Yield (Right b'') (c1 `stack` c2) (defer1 \_ -> lift (Tuple <$> runTerminator q1 <*> runTerminator (terminate c2)))
+    Yield (Right b'') (c1 `stack` c2) (defer1 \_ -> lift (Tuple <$> runTerminator q1 <*> terminateRun c2))
   stack c1 (Yield (Left a'') c2 q2)  = 
-    Yield (Left  a'') (c1 `stack` c2) (defer1 \_ -> lift (Tuple <$> runTerminator (terminate c1) <*> runTerminator q2))
+    Yield (Left  a'') (c1 `stack` c2) (defer1 \_ -> lift (Tuple <$> terminateRun c1 <*> runTerminator q2))
   stack (ChanX fc1 q1) c2            = 
-    ChanX (flip stack c2 <$> fc1)     (defer1 \_ -> lift (Tuple <$> runTerminator q1 <*> runTerminator (terminate c2)))
+    ChanX (flip stack c2 <$> fc1)     (defer1 \_ -> lift (Tuple <$> runTerminator q1 <*> terminateRun c2))
   stack (ChanZ z1) c2                = ChanZ (flip stack c2 <$> z1)
   stack c1 (ChanX fc2 q2)            = 
-    ChanX (stack c1 <$> fc2)          (defer1 \_ -> lift (Tuple <$> runTerminator (terminate c1) <*> runTerminator q2))
+    ChanX (stack c1 <$> fc2)          (defer1 \_ -> lift (Tuple <$> terminateRun c1 <*> runTerminator q2))
   stack c1 (ChanZ z2)                = ChanZ (stack c1 <$> z2)  
   stack (Await f1 q1) (Yield (Right b') c2 q2) = defer1 \_ -> f1 (Right b') `stack` c2
   stack (Yield (Left a') c1 q1) (Await f2 q2)  = defer1 \_ -> c1 `stack` f2 (Left a')

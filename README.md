@@ -130,6 +130,8 @@
 
     terminate :: forall i o f r. (Applicative f) => Channel i o f r -> Terminator f r
 
+    terminateRun :: forall i o f r. (Monad f) => Channel i o f r -> f (Maybe r)
+
     terminator :: forall i o f r. (Applicative f) => Terminator f r -> Channel i o f r -> Channel i o f r
 
     wrapEffect :: forall i o f r. (Monad f) => f (Channel i o f r) -> Channel i o f r

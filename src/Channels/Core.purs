@@ -17,6 +17,7 @@ module Channels.Core
   , stop
   , stop'
   , terminate
+  , terminateRun
   , terminator
   , wrapEffect
   , yield
@@ -37,11 +38,9 @@ module Channels.Core
 
   foreign import data Z :: *
 
-  -- | A channel terminator, which may yield a value or an error (due to 
-  -- | incomplete input), and lazy and / or effectful versions of the 
-  -- | preceding. The error term carries no information because it is only
-  -- | meant to capture errors due to incomplete input, such as when a parser
-  -- | is terminated prematurely an is unable to produce a final result.
+  -- | A channel terminator, which may terminate with a value, or refuse to 
+  -- | terminate. Termination can be accompanied by effects, including 
+  -- | laziness or `f` effects.
   data Terminator f a = TerP a | TerE | TerX (f (Terminator f a)) | TerZ (Lazy (Terminator f a))
 
   -- | An event-driven channel of communication with a well-defined lifecycle.
@@ -50,7 +49,7 @@ module Channels.Core
   -- | defer computation of a channel, and voluntarily terminate with a final
   -- | result value `r`.
   -- |
-  -- | All channels may be forcefully terminated to produce an `f r`.
+  -- | All channels may be forcefully terminated to produce an `f (Maybe r)`.
   data Channel i o f r
     = Yield o (Channel i o f r) (Terminator f r)
     | Await (i -> Channel i o f r) (Terminator f r)
@@ -85,8 +84,8 @@ module Channels.Core
   compose c1 (ChanZ zc2)      = ChanZ (compose c1 <$> zc2)
   compose (ChanX fc1 q1) c2   = ChanX (flip compose c2 <$> fc1) (terminate c2 <> q1)
   compose (ChanZ zc1) c2      = ChanZ (flip compose c2 <$> zc1)
-  compose (Stop r1) c2        = stop' (maybe r1 (flip (<>) r1) <$> runTerminator (terminate c2))
-  compose c1 (Stop r2)        = stop' (maybe r2 (     (<>) r2) <$> runTerminator (terminate c1))
+  compose (Stop r1) c2        = stop' (maybe r1 (flip (<>) r1) <$> terminateRun c2)
+  compose c1 (Stop r2)        = stop' (maybe r2 (     (<>) r2) <$> terminateRun c1)
   compose (Await f1 _) (Yield o c2 _) = defer1 \_ -> f1 o `compose` c2
 
 
@@ -157,14 +156,17 @@ module Channels.Core
   wrapEffect :: forall i o f r. (Monad f) => f (Channel i o f r) -> Channel i o f r
   wrapEffect fc = ChanX fc (lift fc >>= terminate)
 
-  -- | Forcibly terminates a channel (unless the channel has already 
-  -- | voluntarily terminated).
+  -- | Forcibly terminates a channel and returns a terminator.
   terminate :: forall i o f r. (Applicative f) => Channel i o f r -> Terminator f r
   terminate (Yield _ _ q) = q
   terminate (Await   _ q) = q
   terminate (ChanX   _ q) = q
   terminate (ChanZ     l) = defer1 \_ -> (terminate (force l))
   terminate (Stop      r) = pure r
+
+  -- | Terminates a channel and runs the terminator.
+  terminateRun :: forall i o f r. (Monad f) => Channel i o f r -> f (Maybe r)
+  terminateRun = terminate >>> runTerminator
 
   -- | Replaces the value that the channel will produce if forcibly terminated.
   -- | Preserves any effects associated with the old terminator.
