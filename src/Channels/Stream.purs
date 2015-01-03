@@ -16,14 +16,13 @@ module Channels.Stream
   unStream :: forall f r i o. Stream f r i o -> Channel i o f r
   unStream (Stream c) = c
 
-  instance semigroupoidStream :: (Applicative f, Semigroup r) => Semigroupoid (Stream f r) where
+  instance semigroupoidStream :: (Monad f, Semigroup r) => Semigroupoid (Stream f r) where
     (<<<) (Stream c1) (Stream c2) = Stream (compose c1 c2)
 
-  instance categoryStream :: (Applicative f, Monoid r) => Category (Stream f r) where
-    id = Stream (loop (await q (yield q)))
-      where q = pure mempty
+  instance categoryStream :: (Monad f, Semigroup r) => Category (Stream f r) where
+    id = Stream (nonTerminating (await >>= yield))
 
-  instance profunctorStream :: (Applicative f) => Profunctor (Stream f r) where
+  instance profunctorStream :: (Monad f) => Profunctor (Stream f r) where
     dimap f g (Stream c) = Stream (dimap' c)
       where dimap' (Yield o c q) = Yield (g o) (dimap' c) q
             dimap' (Await   h q) = Await (f >>> (dimap' <$> h)) q

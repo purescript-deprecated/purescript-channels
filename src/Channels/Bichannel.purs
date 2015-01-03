@@ -4,9 +4,7 @@ module Channels.Bichannel
   , Bisource(..)
   , Biworkflow(..)
   , awaitDown
-  , awaitDown'
   , awaitUp
-  , awaitUp'
   , runBiworkflow
   , stack
   , toWorkflow
@@ -19,9 +17,12 @@ module Channels.Bichannel
   import Data.Either(Either(..), either)
   import Data.Tuple(Tuple(..))
   import Data.Lazy(Lazy(..), force)
+  import Data.Maybe(Maybe(..))
   import Data.Monoid
   import Data.Profunctor(Profunctor, dimap)
+  import Control.Apply((*>))
   import Control.Lazy(defer1)
+  import Control.Monad.Trans(lift)
 
   import Channels.Core
   import Channels.Stream(Stream(..), unStream)
@@ -60,42 +61,27 @@ module Channels.Bichannel
           loop' (Stop      r) = Stop r
 
   -- | Flips the upstream and downstream channels of the bichannel.
-  reflect :: forall a a' b b' f r. (Applicative f) => Bichannel a a' b b' f r -> Bichannel b b' a a' f r
+  reflect :: forall a a' b b' f r. (Monad f) => Bichannel a a' b b' f r -> Bichannel b b' a a' f r
   reflect c = unStream (dimap (either Right Left) (either Right Left) (Stream c))
 
   -- | Using the specified terminator, awaits a downstream value and passes 
   -- | through all upstream values.
-  awaitDown' :: forall a a' b f. (Monad f) => Effectable f a -> Bichannel a a' b b f a
-  awaitDown' q = await' (Left <$> q) >>= either stop (yieldUp q)
+  awaitDown :: forall a a' b f. (Monad f) => Bichannel a a' b b f a
+  awaitDown = await >>= either stop (\x -> yieldUp x *> awaitDown)
 
   -- | Using the specified terminator, awaits an upstream value and passes 
   -- | through all downstream values.
-  awaitUp' :: forall a b b' f. (Monad f) => Effectable f b -> Bichannel a a b b' f b
-  awaitUp' q = await' (Right <$> q) >>= either (yieldDown q) stop
+  awaitUp :: forall a b b' f. (Monad f) => Bichannel a a b b' f b
+  awaitUp = await >>= either (\x -> yieldDown x *> awaitUp) stop
 
-    -- | Using the specified terminator, awaits a downstream value and passes 
-  -- | through all upstream values.
-  awaitDown :: forall a a' b f r. (Applicative f) => Effectable f r -> (a -> Bichannel a a' b b f r) -> Bichannel a a' b b f r
-  awaitDown q f = await q g
-    where 
-      g (Left a)  = f a
-      g (Right b) = yieldUp q b
-
-  -- | Using the specified terminator, awaits an upstream value and passes 
-  -- | through all downstream values.
-  awaitUp :: forall a b b' f r. (Applicative f) => Effectable f r -> (b -> Bichannel a a b b' f r) -> Bichannel a a b b' f r
-  awaitUp q f = await q g
-    where 
-      g (Left a)  = yieldDown q a 
-      g (Right b) = f b
 
   -- | Using the specified terminator, emits a downstream value.
-  yieldDown :: forall a a' b b' f r. (Applicative f) => Effectable f r -> a' -> Bichannel a a' b b' f r
-  yieldDown q a' = yield q (Left a')
+  yieldDown :: forall a a' b b' f. (Applicative f) => a' -> Bichannel a a' b b' f Unit
+  yieldDown a' = yield (Left a')
 
   -- | Using the specified terminator, emits an upstream value.
-  yieldUp :: forall a a' b b' f r. (Applicative f) => Effectable f r -> b' -> Bichannel a a' b b' f r
-  yieldUp q b' = yield q (Right b')
+  yieldUp :: forall a a' b b' f. (Applicative f) => b' -> Bichannel a a' b b' f Unit
+  yieldUp b' = yield (Right b')
 
   -- | Stacks one bichannel on top of another. Note that if one bichannel 
   -- | terminates before the other, the second will be forcibly terminated.
@@ -103,20 +89,24 @@ module Channels.Bichannel
   -- | Laziness is introduced when the two channels pass messages between each
   -- | other. This allows channels to be stacked even when all they do is 
   -- | forever pass each other messages (e.g. stacking a source on a sink).
-  stack :: forall a a' a'' b b' b'' f r r'. (Applicative f) => Bichannel a a' b' b'' f r -> Bichannel a' a'' b b' f r' -> Bichannel a a'' b b'' f (Tuple r r')
-  stack (Stop r1) c2                 = stop' (Tuple r1 <$> runEffectable (terminate c2))
-  stack c1 (Stop r2)                 = stop' (flip Tuple r2 <$> runEffectable (terminate c1))
-  stack (Yield (Right b'') c1 q1) c2 = Yield (Right b'') (c1 `stack` c2) (defer1 \_ -> (Tuple <$> q1 <*> terminate c2))
-  stack c1 (Yield (Left a'') c2 q2)  = Yield (Left  a'') (c1 `stack` c2) (defer1 \_ -> (Tuple <$> terminate c1 <*> q2))
-  stack (ChanX fc1 q1) c2            = ChanX (flip stack c2 <$> fc1)     (defer1 \_ -> (Tuple <$> q1 <*> terminate c2))  
+  stack :: forall a a' a'' b b' b'' f r r'. (Monad f) => Bichannel a a' b' b'' f r -> Bichannel a' a'' b b' f r' -> Bichannel a a'' b b'' f (Tuple (Maybe r) (Maybe r'))
+  stack (Stop r1) c2                 = stop' (Tuple (Just r1) <$> runTerminator (terminate c2))
+  stack c1 (Stop r2)                 = stop' (flip Tuple (Just r2) <$> runTerminator (terminate c1))
+  stack (Yield (Right b'') c1 q1) c2 = 
+    Yield (Right b'') (c1 `stack` c2) (defer1 \_ -> lift (Tuple <$> runTerminator q1 <*> runTerminator (terminate c2)))
+  stack c1 (Yield (Left a'') c2 q2)  = 
+    Yield (Left  a'') (c1 `stack` c2) (defer1 \_ -> lift (Tuple <$> runTerminator (terminate c1) <*> runTerminator q2))
+  stack (ChanX fc1 q1) c2            = 
+    ChanX (flip stack c2 <$> fc1)     (defer1 \_ -> lift (Tuple <$> runTerminator q1 <*> runTerminator (terminate c2)))
   stack (ChanZ z1) c2                = ChanZ (flip stack c2 <$> z1)
-  stack c1 (ChanX fc2 q2)            = ChanX (stack c1 <$> fc2)          (defer1 \_ -> (Tuple <$> terminate c1 <*> q2))
+  stack c1 (ChanX fc2 q2)            = 
+    ChanX (stack c1 <$> fc2)          (defer1 \_ -> lift (Tuple <$> runTerminator (terminate c1) <*> runTerminator q2))
   stack c1 (ChanZ z2)                = ChanZ (stack c1 <$> z2)  
   stack (Await f1 q1) (Yield (Right b') c2 q2) = defer1 \_ -> f1 (Right b') `stack` c2
   stack (Yield (Left a') c1 q1) (Await f2 q2)  = defer1 \_ -> c1 `stack` f2 (Left a')
 
   -- | Converts a biworkflow to a workflow.
-  toWorkflow :: forall f r. (Applicative f) => Biworkflow f r -> Workflow f r
+  toWorkflow :: forall f r. (Monad f) => Biworkflow f r -> Workflow f r
   toWorkflow c = unStream (dimap unsafeCoerce unsafeCoerce (Stream c))
 
   -- | Runs a biworkflow.
