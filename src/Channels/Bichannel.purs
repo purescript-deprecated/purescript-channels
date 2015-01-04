@@ -1,4 +1,4 @@
-module Channels.Bichannel 
+module Channels.Bichannel
   ( Bichannel(..)
   , Bisink(..)
   , Bisource(..)
@@ -12,7 +12,7 @@ module Channels.Bichannel
   , toUpstream
   , yieldDown
   , yieldUp
-  ) where 
+  ) where
 
   import Data.Either(Either(..), either)
   import Data.Tuple(Tuple(..))
@@ -30,13 +30,13 @@ module Channels.Bichannel
   -- | A bidirectional channel, which has both upstream and downstream channels
   -- | of communication.
   type Bichannel a a' b b' f r = Channel (Either a b) (Either a' b') f r
-  
-  -- | A bisource, defined as a bichannel that never emits upstream values or 
+
+  -- | A bisource, defined as a bichannel that never emits upstream values or
   -- | awaits downstream values.
   type Bisource f a' b r = Bichannel Z a' b Z f r
 
-  -- | A bisink, defined as a bichannel that never emits downstream values or 
-  -- | awaits upstream values. 
+  -- | A bisink, defined as a bichannel that never emits downstream values or
+  -- | awaits upstream values.
   type Bisink f a b' r = Bichannel a Z b' Z f r
 
   -- | A biworkflow, which never awaits or emits upstream or downstream values.
@@ -64,12 +64,12 @@ module Channels.Bichannel
   reflect :: forall a a' b b' f r. (Monad f) => Bichannel a a' b b' f r -> Bichannel b b' a a' f r
   reflect c = unStream (dimap (either Right Left) (either Right Left) (Stream c))
 
-  -- | Using the specified terminator, awaits a downstream value and passes 
+  -- | Using the specified terminator, awaits a downstream value and passes
   -- | through all upstream values.
   awaitDown :: forall a a' b f. (Monad f) => Bichannel a a' b b f a
   awaitDown = await >>= either stop (\x -> yieldUp x *> awaitDown)
 
-  -- | Using the specified terminator, awaits an upstream value and passes 
+  -- | Using the specified terminator, awaits an upstream value and passes
   -- | through all downstream values.
   awaitUp :: forall a b b' f. (Monad f) => Bichannel a a b b' f b
   awaitUp = await >>= either (\x -> yieldDown x *> awaitUp) stop
@@ -83,25 +83,25 @@ module Channels.Bichannel
   yieldUp :: forall a a' b b' f. (Applicative f) => b' -> Bichannel a a' b b' f Unit
   yieldUp b' = yield (Right b')
 
-  -- | Stacks one bichannel on top of another. Note that if one bichannel 
+  -- | Stacks one bichannel on top of another. Note that if one bichannel
   -- | terminates before the other, the second will be forcibly terminated.
-  -- | 
+  -- |
   -- | Laziness is introduced when the two channels pass messages between each
-  -- | other. This allows channels to be stacked even when all they do is 
+  -- | other. This allows channels to be stacked even when all they do is
   -- | forever pass each other messages (e.g. stacking a source on a sink).
   stack :: forall a a' a'' b b' b'' f r r'. (Monad f) => Bichannel a a' b' b'' f r -> Bichannel a' a'' b b' f r' -> Bichannel a a'' b b'' f (Tuple (Maybe r) (Maybe r'))
   stack (Stop r1) c2                 = stop' (Tuple (Just r1) <$> runTerminator (terminate c2))
   stack c1 (Stop r2)                 = stop' (flip Tuple (Just r2) <$> terminateRun c1)
-  stack (Yield (Right b'') c1 q1) c2 = 
+  stack (Yield (Right b'') c1 q1) c2 =
     Yield (Right b'') (c1 `stack` c2) (defer1 \_ -> lift (Tuple <$> runTerminator q1 <*> terminateRun c2))
-  stack c1 (Yield (Left a'') c2 q2)  = 
+  stack c1 (Yield (Left a'') c2 q2)  =
     Yield (Left  a'') (c1 `stack` c2) (defer1 \_ -> lift (Tuple <$> terminateRun c1 <*> runTerminator q2))
-  stack (ChanX fc1 q1) c2            = 
+  stack (ChanX fc1 q1) c2            =
     ChanX (flip stack c2 <$> fc1)     (defer1 \_ -> lift (Tuple <$> runTerminator q1 <*> terminateRun c2))
   stack (ChanZ z1) c2                = ChanZ (flip stack c2 <$> z1)
-  stack c1 (ChanX fc2 q2)            = 
+  stack c1 (ChanX fc2 q2)            =
     ChanX (stack c1 <$> fc2)          (defer1 \_ -> lift (Tuple <$> terminateRun c1 <*> runTerminator q2))
-  stack c1 (ChanZ z2)                = ChanZ (stack c1 <$> z2)  
+  stack c1 (ChanZ z2)                = ChanZ (stack c1 <$> z2)
   stack (Await f1 q1) (Yield (Right b') c2 q2) = defer1 \_ -> f1 (Right b') `stack` c2
   stack (Yield (Left a') c1 q1) (Await f2 q2)  = defer1 \_ -> c1 `stack` f2 (Left a')
 
@@ -113,6 +113,6 @@ module Channels.Bichannel
   runBiworkflow :: forall f r. (Monad f) => Biworkflow f r -> f r
   runBiworkflow = toWorkflow >>> runWorkflow
 
-  -- This function will never be invoked because sinks are prevented by their 
+  -- This function will never be invoked because sinks are prevented by their
   -- type signature from emitting values and sources are prevented from using them.
-  foreign import unsafeCoerce "function(a){return a;}" :: forall a b. a -> b 
+  foreign import unsafeCoerce "function unsafeCoerce(a){return a;}" :: forall a b. a -> b

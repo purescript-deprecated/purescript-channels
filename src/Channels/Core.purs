@@ -22,7 +22,7 @@ module Channels.Core
   , wrapEffect
   , yield
   , yield'
-  ) where 
+  ) where
 
   import Data.Array((!!))
   import Data.Foldable(Foldable, foldl, foldr, foldMap)
@@ -38,14 +38,14 @@ module Channels.Core
 
   foreign import data Z :: *
 
-  -- | A channel terminator, which may terminate with a value, or refuse to 
-  -- | terminate. Termination can be accompanied by effects, including 
+  -- | A channel terminator, which may terminate with a value, or refuse to
+  -- | terminate. Termination can be accompanied by effects, including
   -- | laziness or `f` effects.
   data Terminator f a = TerP a | TerE | TerX (f (Terminator f a)) | TerZ (Lazy (Terminator f a))
 
   -- | An event-driven channel of communication with a well-defined lifecycle.
-  -- | 
-  -- | Channels may yield output values, await input values, execute effects, 
+  -- |
+  -- | Channels may yield output values, await input values, execute effects,
   -- | defer computation of a channel, and voluntarily terminate with a final
   -- | result value `r`.
   -- |
@@ -55,7 +55,7 @@ module Channels.Core
     | Await (i -> Channel i o f r) (Terminator f r)
     | ChanX (f (Channel i o f r)) (Terminator f r)
     | ChanZ (Lazy (Channel i o f r))
-    | Stop r  
+    | Stop r
 
   -- | A source of values, which awaits nothing.
   type Source o f r = Channel Z o f r
@@ -66,7 +66,7 @@ module Channels.Core
   -- | A workflow consists of a source composed with a sink.
   type Workflow f r = Channel Z Z f r
 
-  foreign import unsafeZ "val unsafeZ = undefined;" :: Z
+  foreign import unsafeZ "var unsafeZ = undefined;" :: Z
 
   -- | Lifts a pure function to a channel.
   moore :: forall i o f. (Monad f) => (i -> o) -> Channel i o f Unit
@@ -105,7 +105,7 @@ module Channels.Core
           loop (ChanZ     z) = loop (force z)
           loop (Stop      r) = pure r
 
-  -- | Returns a new channel that will restart when it reaches the end. 
+  -- | Returns a new channel that will restart when it reaches the end.
   -- | Although the channel will never voluntarily terminate, it may still be
   -- | forcibly terminated.
   loop :: forall i o f r. (Functor f) => Channel i o f r -> Channel i o f r
@@ -125,7 +125,7 @@ module Channels.Core
           loop' (ChanX   x q) = ChanX (loop' <$> x) (q *> TerE)
           loop' (ChanZ     z) = ChanZ (loop' <$> z)
           loop' (Stop      r) = loop' c0
-  
+
   -- | Awaits a value and monadically returns it.
   await :: forall i o f. Channel i o f i
   await = Await stop TerE
@@ -180,7 +180,7 @@ module Channels.Core
       loop (Stop       r) = Stop r
 
   -- | Attaches the specified finalizer to the channel. The finalizer will be
-  -- | called when the channel is forcibly terminated or when it voluntarily 
+  -- | called when the channel is forcibly terminated or when it voluntarily
   -- | terminates (but just once).
   finalizer :: forall i o f r x. (Monad f) => f x -> Channel i o f r -> Channel i o f r
   finalizer x = loop
@@ -194,7 +194,7 @@ module Channels.Core
       loop (Stop      r) = stop' x *> Stop r
 
   -- Terminator instances
-  instance showTerminator :: (Functor f, Show (f String), Show a) => Show (Terminator f a) where 
+  instance showTerminator :: (Functor f, Show (f String), Show a) => Show (Terminator f a) where
     show (TerP a) = "TerP (" ++ show a ++ ")"
     show TerE     = "TerE"
     show (TerX x) = "TerX (" ++ show (show <$> x) ++ ")"
@@ -203,7 +203,7 @@ module Channels.Core
   instance lazy1Terminator :: Lazy1 (Terminator f) where
     defer1 l = TerZ (defer l)
 
-  instance functorTerminator :: (Functor f) => Functor (Terminator f) where 
+  instance functorTerminator :: (Functor f) => Functor (Terminator f) where
     (<$>) f (TerP a) = TerP (f a)
     (<$>) f TerE     = TerE
     (<$>) f (TerX x) = TerX ((<$>) f <$> x)
@@ -230,13 +230,13 @@ module Channels.Core
 
   instance monadTerminator :: (Monad f) => Monad (Terminator f)
 
-  instance monadTransTerminator :: MonadTrans Terminator where 
+  instance monadTransTerminator :: MonadTrans Terminator where
     lift fa = TerX (TerP <$> fa)
 
   instance semigroupTerminator :: (Monad f, Semigroup a) => Semigroup (Terminator f a) where
     (<>) x y = defer1 \_ -> TerX (maybe TerE TerP <$> ((<>) <$> runTerminator x <*> runTerminator y))
 
-  instance monoidTerminator :: (Monad f, Semigroup a) => Monoid (Terminator f a) where 
+  instance monoidTerminator :: (Monad f, Semigroup a) => Monoid (Terminator f a) where
     mempty = TerE
 
   -- Channel instances
@@ -258,7 +258,7 @@ module Channels.Core
     (<>) (Stop      r) w = (<>) r <$> w
 
   instance monoidChannel :: (Applicative f, Monoid r) => Monoid (Channel io io f r) where
-    mempty = Stop mempty 
+    mempty = Stop mempty
 
   instance applyChannel :: (Applicative f) => Apply (Channel i o f) where
     (<*>) (Yield o c q) w = Yield o (c <*> w) (q <*> terminate w)
@@ -283,5 +283,5 @@ module Channels.Core
 
   instance monadChannel :: (Monad f) => Monad (Channel i o f)
 
-  instance monadTransChannel :: MonadTrans (Channel i o) where 
+  instance monadTransChannel :: MonadTrans (Channel i o) where
     lift = stop'
