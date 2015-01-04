@@ -115,4 +115,4 @@ module Channels.Bichannel
 
   -- This function will never be invoked because sinks are prevented by their 
   -- type signature from emitting values and sources are prevented from using them.
-  foreign import unsafeCoerce "function(a){return a;}" :: forall a b. a -> b 
+  foreign import unsafeCoerce "function unsafeCoerce(a){return a;}" :: forall a b. a -> b 

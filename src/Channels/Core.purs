@@ -30,10 +30,15 @@ module Channels.Core
   import Data.Monoid(Monoid, mempty)
   import Data.Tuple(Tuple(..))
   import Data.Lazy(Lazy(..), force, defer)
-  import Control.Lazy(Lazy1, defer1)
-  import Control.Bind
-  import Control.Monad.Trans(MonadTrans, lift)
+    
+  import Control.Alt
+  import Control.Alternative(Alternative)
   import Control.Apply
+  import Control.Bind
+  import Control.Lazy(Lazy1, defer1)
+  import Control.Monad.Trans(MonadTrans, lift)
+  import Control.MonadPlus(MonadPlus)
+  import Control.Plus
 
   foreign import data Z :: *
 
@@ -65,7 +70,7 @@ module Channels.Core
   -- | A workflow consists of a source composed with a sink.
   type Workflow f r = Channel Z Z f r
 
-  foreign import unsafeZ "val unsafeZ = undefined;" :: Z
+  foreign import unsafeZ "var unsafeZ = undefined;" :: Z
 
   nonTerminator :: forall f a. Terminator f a
   nonTerminator = TerE
@@ -230,6 +235,22 @@ module Channels.Core
 
   instance monoidTerminator :: (Monad f, Semigroup a) => Monoid (Terminator f a) where 
     mempty = TerE
+
+  instance altTerminator :: (Functor f) => Alt (Terminator f) where 
+    (<|>) TerE y = y
+    (<|>) x TerE = x
+    (<|>) (TerX x) y = TerX (flip (<|>) y <$> x)
+    (<|>) (TerZ x) y = TerZ (flip (<|>) y <$> x)
+    (<|>) x (TerX y) = TerX (     (<|>) x <$> y)
+    (<|>) x (TerZ y) = TerZ (     (<|>) x <$> y)
+    (<|>) x y = x
+
+  instance plusTerminator :: (Functor f) => Plus (Terminator f) where
+    empty = TerE
+
+  instance alternativeTerminator :: (Applicative f) => Alternative (Terminator f)
+
+  instance monadPlusTerminator :: (Monad f) => Monad (Terminator f)
 
   -- Channel instances
   instance lazy1Channel :: Lazy1 (Channel i o f) where

@@ -65,6 +65,10 @@
 
 ### Type Class Instances
 
+    instance altTerminator :: (Functor f) => Alt (Terminator f)
+
+    instance alternativeTerminator :: (Applicative f) => Alternative (Terminator f)
+
     instance applicativeChannel :: (Applicative f) => Applicative (Channel i o f)
 
     instance applicativeTerminator :: (Applicative f) => Applicative (Terminator f)
@@ -87,6 +91,8 @@
 
     instance monadChannel :: (Monad f) => Monad (Channel i o f)
 
+    instance monadPlusTerminator :: (Monad f) => Monad (Terminator f)
+
     instance monadTerminator :: (Monad f) => Monad (Terminator f)
 
     instance monadTransChannel :: MonadTrans (Channel i o)
@@ -96,6 +102,8 @@
     instance monoidChannel :: (Applicative f, Monoid r) => Monoid (Channel io io f r)
 
     instance monoidTerminator :: (Monad f, Semigroup a) => Monoid (Terminator f a)
+
+    instance plusTerminator :: (Functor f) => Plus (Terminator f)
 
     instance semigroupChannel :: (Applicative f, Semigroup r) => Semigroup (Channel io io f r)
 

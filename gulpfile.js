@@ -4,6 +4,7 @@ var gulp        = require('gulp')
   , purescript  = require('gulp-purescript')
   , run         = require('gulp-run')
   , runSequence = require('run-sequence')
+  , jsValidate  = require('gulp-jsvalidate')
   ;
 
 var paths = {
@@ -19,6 +20,7 @@ var paths = {
             src: 'src/**/*.purs'
         }
     }
+
 };
 
 var options = {
@@ -30,13 +32,16 @@ var options = {
 
 function compile (compiler, src, opts) {
     var psc = compiler(opts);
+
     psc.on('error', function(e) {
         console.error(e.message);
         psc.end();
     });
+
     return gulp.src(src.concat(paths.bowerSrc))
         .pipe(psc)
-        .pipe(gulp.dest(paths.dest));
+        .pipe(gulp.dest(paths.dest))
+        .pipe(jsValidate());
 };
 
 function docs (target) {
