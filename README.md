@@ -38,6 +38,10 @@
 
 ### Values
 
+    moore :: forall i o f. (Monad f) => (i -> o) -> Channel i o f Unit
+
+    moore' :: forall i o f. (Monad f) => (i -> f o) -> Channel i o f Unit
+
     yieldAll :: forall i o f c. (Monad f, Foldable c) => c o -> Channel i o f Unit
 
 
@@ -123,10 +127,6 @@
     loop :: forall i o f r. (Functor f) => Channel i o f r -> Channel i o f r
 
     loopForever :: forall i o f r r'. (Monad f) => Channel i o f r -> Channel i o f r'
-
-    moore :: forall i o f. (Monad f) => (i -> o) -> Channel i o f Unit
-
-    moore' :: forall i o f. (Monad f) => (i -> f o) -> Channel i o f Unit
 
     nonTerminator :: forall f a. Terminator f a
 

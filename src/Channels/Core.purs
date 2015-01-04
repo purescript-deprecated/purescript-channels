@@ -10,8 +10,6 @@ module Channels.Core
   , finalizer
   , loop
   , loopForever
-  , moore
-  , moore'
   , nonTerminator
   , runTerminator
   , runWorkflow
@@ -75,14 +73,6 @@ module Channels.Core
   nonTerminator :: forall f a. Terminator f a
   nonTerminator = TerE
 
-  -- | Lifts a pure function to a channel.
-  moore :: forall i o f. (Monad f) => (i -> o) -> Channel i o f Unit
-  moore f = loop $ terminator (pure unit) (await >>= (f >>> yield))
-
-  -- | Lifts an effectful function to a channel.
-  moore' :: forall i o f. (Monad f) => (i -> f o) -> Channel i o f Unit
-  moore' f = loop $ terminator (pure unit) (await >>= (f >>> yield'))
-
   -- | Pipes the output of one channel to the input of another.
   compose :: forall a b c f r. (Monad f, Semigroup r) => Channel b c f r -> Channel a b f r -> Channel a c f r
   compose c1 (Await f2 q2)    = Await (compose c1 <$> f2) (q2 <> terminate c1)
@@ -94,7 +84,6 @@ module Channels.Core
   compose (Stop r1) c2        = lift (maybe r1 (flip (<>) r1) <$> terminateRun c2)
   compose c1 (Stop r2)        = lift (maybe r2 (     (<>) r2) <$> terminateRun c1)
   compose (Await f1 _) (Yield o c2 _) = defer1 \_ -> f1 o `compose` c2
-
 
   -- | Runs an terminator to produce an `f (Maybe a)`.
   runTerminator :: forall f a. (Monad f) => Terminator f a -> f (Maybe a)
