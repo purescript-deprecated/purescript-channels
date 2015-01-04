@@ -20,7 +20,7 @@ module Channels.Stream
     (<<<) (Stream c1) (Stream c2) = Stream (compose c1 c2)
 
   instance categoryStream :: (Monad f, Semigroup r) => Category (Stream f r) where
-    id = Stream (nonTerminating (await >>= yield))
+    id = Stream (loopForever (await >>= yield))
 
   instance profunctorStream :: (Monad f) => Profunctor (Stream f r) where
     dimap f g (Stream c) = Stream (dimap' c)

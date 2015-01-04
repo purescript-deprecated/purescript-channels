@@ -9,13 +9,12 @@ module Channels.Core
   , compose
   , finalizer
   , loop
+  , loopForever
   , moore
   , moore'
-  , nonTerminating
+  , nonTerminator
   , runTerminator
   , runWorkflow
-  , stop
-  , stop'
   , terminate
   , terminateRun
   , terminator
@@ -68,6 +67,9 @@ module Channels.Core
 
   foreign import unsafeZ "val unsafeZ = undefined;" :: Z
 
+  nonTerminator :: forall f a. Terminator f a
+  nonTerminator = TerE
+
   -- | Lifts a pure function to a channel.
   moore :: forall i o f. (Monad f) => (i -> o) -> Channel i o f Unit
   moore f = loop $ terminator (pure unit) (await >>= (f >>> yield))
@@ -84,8 +86,8 @@ module Channels.Core
   compose c1 (ChanZ zc2)      = ChanZ (compose c1 <$> zc2)
   compose (ChanX fc1 q1) c2   = ChanX (flip compose c2 <$> fc1) (terminate c2 <> q1)
   compose (ChanZ zc1) c2      = ChanZ (flip compose c2 <$> zc1)
-  compose (Stop r1) c2        = stop' (maybe r1 (flip (<>) r1) <$> terminateRun c2)
-  compose c1 (Stop r2)        = stop' (maybe r2 (     (<>) r2) <$> terminateRun c1)
+  compose (Stop r1) c2        = lift (maybe r1 (flip (<>) r1) <$> terminateRun c2)
+  compose c1 (Stop r2)        = lift (maybe r2 (     (<>) r2) <$> terminateRun c1)
   compose (Await f1 _) (Yield o c2 _) = defer1 \_ -> f1 o `compose` c2
 
 
@@ -105,9 +107,7 @@ module Channels.Core
           loop (ChanZ     z) = loop (force z)
           loop (Stop      r) = pure r
 
-  -- | Returns a new channel that will restart when it reaches the end. 
-  -- | Although the channel will never voluntarily terminate, it may still be
-  -- | forcibly terminated.
+  -- | Returns a looping channel that restarts when it reaches the end.
   loop :: forall i o f r. (Functor f) => Channel i o f r -> Channel i o f r
   loop c0 = loop' c0
     where loop' (Yield o c q) = Yield o (loop' c) q
@@ -118,23 +118,17 @@ module Channels.Core
 
 
   -- | Returns a looping channel that will refuse to terminate.
-  nonTerminating :: forall i o f r r'. (Monad f) => Channel i o f r -> Channel i o f r'
-  nonTerminating c0 = loop' c0
-    where loop' (Yield o c q) = Yield o (loop' c) (q *> TerE)
-          loop' (Await   f q) = Await (loop' <$> f) (q *> TerE)
-          loop' (ChanX   x q) = ChanX (loop' <$> x) (q *> TerE)
+  loopForever :: forall i o f r r'. (Monad f) => Channel i o f r -> Channel i o f r'
+  loopForever c0 = loop' c0
+    where loop' (Yield o c q) = Yield o (loop' c) (q *> nonTerminator)
+          loop' (Await   f q) = Await (loop' <$> f) (q *> nonTerminator)
+          loop' (ChanX   x q) = ChanX (loop' <$> x) (q *> nonTerminator)
           loop' (ChanZ     z) = ChanZ (loop' <$> z)
           loop' (Stop      r) = loop' c0
   
   -- | Awaits a value and monadically returns it.
-  await :: forall i o f. Channel i o f i
-  await = Await stop TerE
-
-  stopUnit :: forall i o f. Channel i o f Unit
-  stopUnit = Stop unit
-
-  terminatorUnit :: forall f. Terminator f Unit
-  terminatorUnit = TerP unit
+  await :: forall i o f. (Applicative f) => Channel i o f i
+  await = Await pure nonTerminator
 
   -- | Yields a value.
   yield :: forall i o f. (Applicative f) => o -> Channel i o f Unit
@@ -143,14 +137,6 @@ module Channels.Core
   -- | Using the specified terminator, yields an effectful value.
   yield' :: forall i o f. (Monad f) => f o -> Channel i o f Unit
   yield' fo = wrapEffect (yield <$> fo)
-
-  -- | Produces a channel that terminates the channel with the pure value `r`.
-  stop :: forall i o f r. r -> Channel i o f r
-  stop r = Stop r
-
-  -- | Produces a channel that terminates the channel with the effectful value `f r`.
-  stop' :: forall i o f r. (Monad f) => f r -> Channel i o f r
-  stop' fr = wrapEffect (stop <$> fr)
 
   -- | Wraps an effect into the channel.
   wrapEffect :: forall i o f r. (Monad f) => f (Channel i o f r) -> Channel i o f r
@@ -191,7 +177,13 @@ module Channels.Core
       loop (Await   f q) = Await (loop <$> f) (x' *> q)
       loop (ChanX   x q) = ChanX (loop <$> x) (x' *> q)
       loop (ChanZ     z) = ChanZ (loop <$> z)
-      loop (Stop      r) = stop' x *> Stop r
+      loop (Stop      r) = lift x *> Stop r
+
+  stopUnit :: forall i o f. Channel i o f Unit
+  stopUnit = Stop unit
+
+  terminatorUnit :: forall f. Terminator f Unit
+  terminatorUnit = TerP unit
 
   -- Terminator instances
   instance showTerminator :: (Functor f, Show (f String), Show a) => Show (Terminator f a) where 
@@ -284,4 +276,4 @@ module Channels.Core
   instance monadChannel :: (Monad f) => Monad (Channel i o f)
 
   instance monadTransChannel :: MonadTrans (Channel i o) where 
-    lift = stop'
+    lift fr = wrapEffect (pure <$> fr)

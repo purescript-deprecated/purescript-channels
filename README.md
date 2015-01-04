@@ -106,7 +106,7 @@
 
 ### Values
 
-    await :: forall i o f. Channel i o f i
+    await :: forall i o f. (Applicative f) => Channel i o f i
 
     compose :: forall a b c f r. (Monad f, Semigroup r) => Channel b c f r -> Channel a b f r -> Channel a c f r
 
@@ -114,19 +114,17 @@
 
     loop :: forall i o f r. (Functor f) => Channel i o f r -> Channel i o f r
 
+    loopForever :: forall i o f r r'. (Monad f) => Channel i o f r -> Channel i o f r'
+
     moore :: forall i o f. (Monad f) => (i -> o) -> Channel i o f Unit
 
     moore' :: forall i o f. (Monad f) => (i -> f o) -> Channel i o f Unit
 
-    nonTerminating :: forall i o f r r'. (Monad f) => Channel i o f r -> Channel i o f r'
+    nonTerminator :: forall f a. Terminator f a
 
     runTerminator :: forall f a. (Monad f) => Terminator f a -> f (Maybe a)
 
     runWorkflow :: forall f r. (Monad f) => Workflow f r -> f r
-
-    stop :: forall i o f r. r -> Channel i o f r
-
-    stop' :: forall i o f r. (Monad f) => f r -> Channel i o f r
 
     terminate :: forall i o f r. (Applicative f) => Channel i o f r -> Terminator f r
 

@@ -67,12 +67,12 @@ module Channels.Bichannel
   -- | Using the specified terminator, awaits a downstream value and passes 
   -- | through all upstream values.
   awaitDown :: forall a a' b f. (Monad f) => Bichannel a a' b b f a
-  awaitDown = await >>= either stop (\x -> yieldUp x *> awaitDown)
+  awaitDown = await >>= either pure (\x -> yieldUp x *> awaitDown)
 
   -- | Using the specified terminator, awaits an upstream value and passes 
   -- | through all downstream values.
   awaitUp :: forall a b b' f. (Monad f) => Bichannel a a b b' f b
-  awaitUp = await >>= either (\x -> yieldDown x *> awaitUp) stop
+  awaitUp = await >>= either (\x -> yieldDown x *> awaitUp) pure
 
 
   -- | Using the specified terminator, emits a downstream value.
@@ -90,8 +90,8 @@ module Channels.Bichannel
   -- | other. This allows channels to be stacked even when all they do is 
   -- | forever pass each other messages (e.g. stacking a source on a sink).
   stack :: forall a a' a'' b b' b'' f r r'. (Monad f) => Bichannel a a' b' b'' f r -> Bichannel a' a'' b b' f r' -> Bichannel a a'' b b'' f (Tuple (Maybe r) (Maybe r'))
-  stack (Stop r1) c2                 = stop' (Tuple (Just r1) <$> runTerminator (terminate c2))
-  stack c1 (Stop r2)                 = stop' (flip Tuple (Just r2) <$> terminateRun c1)
+  stack (Stop r1) c2                 = lift (Tuple (Just r1) <$> runTerminator (terminate c2))
+  stack c1 (Stop r2)                 = lift (flip Tuple (Just r2) <$> terminateRun c1)
   stack (Yield (Right b'') c1 q1) c2 = 
     Yield (Right b'') (c1 `stack` c2) (defer1 \_ -> lift (Tuple <$> runTerminator q1 <*> terminateRun c2))
   stack c1 (Yield (Left a'') c2 q2)  = 
