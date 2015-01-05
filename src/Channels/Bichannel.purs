@@ -42,40 +42,17 @@ module Channels.Bichannel
   -- | A biworkflow, which never awaits or emits upstream or downstream values.
   type Biworkflow f r = Bichannel Z Z Z Z f r
 
-  {- 
-  tupYield :: forall a f r b b'. (Monad f) => b' -> Channel b b' f r -> Terminator f r -> Bichannel a a b b' f r
-  tupYield b' c q = terminator q (yield (Right b') *> toUpstream c)
-
-  tupAwait :: forall a f r b b'. (Monad f) => (b -> Channel b b' f r) -> Terminator f r -> Bichannel a a b b' f r
-  tupAwait h q = await >>= either (\a -> yield (Left a) *> a h q) (\b -> toUpstream (h b))
-
-  tupStop :: forall a f r b b'. (Monad f) => r -> Bichannel a a b b' f r
-  tupStop = return
-
   -- | Converts a stream to an upstream bichannel.
   toUpstream :: forall a f r b b'. (Monad f) => Channel b b' f r -> Bichannel a a b b' f r
-  toUpstream = wrapEffect (foldChannel y a s)
-    where y = tupYield
-          a = tupAwait
-          s = tupStop
-  -} 
-
-  toUpstream :: forall a f r b b'. (Monad f) => Channel b b' f r -> Bichannel a a b b' f r
-  toUpstream c = loop' c
-    where loop' (Yield o c q) = Yield (Right o) (loop' c) q
-          loop' c0 @ (Await h q) = Await (either (\a -> Yield (Left a) (loop' c0) q) (\b -> loop' (h b))) q
-          loop' (ChanX     x) = ChanX (loop' <$> x)
-          loop' (ChanZ     z) = ChanZ (loop' <$> z)
-          loop' (Stop      r) = Stop r
+  toUpstream = wrapEffect <<< foldChannel yieldF awaitF return
+    where yieldF b' c q = terminator q (yield (Right b') *> toUpstream c)
+          awaitF    h q = await >>= either (\a -> yield (Left a) *> awaitF h q) (\b -> toUpstream (h b))
 
   -- | Converts a stream to a downstream bichannel.
-  toDownstream :: forall b f r a a'. (Functor f) => Channel a a' f r -> Bichannel a a' b b f r
-  toDownstream c = loop' c
-    where loop' (Yield o c q) = Yield (Left o) (loop' c) q
-          loop' c0 @ (Await h q) = Await (either (\a -> loop' (h a)) (\b -> Yield (Right b) (loop' c0) q)) q
-          loop' (ChanX     x) = ChanX (loop' <$> x)
-          loop' (ChanZ     z) = ChanZ (loop' <$> z)
-          loop' (Stop      r) = Stop r
+  toDownstream :: forall b f r a a'. (Monad f) => Channel a a' f r -> Bichannel a a' b b f r
+  toDownstream = wrapEffect <<< foldChannel yieldF awaitF return
+    where yieldF a' c q = terminator q (yield (Left a') *> toDownstream c)
+          awaitF    h q = await >>= either (\a -> toDownstream (h a)) (\b -> yield (Right b) *> awaitF h q)
 
   -- | Flips the upstream and downstream channels of the bichannel.
   reflect :: forall a a' b b' f r. (Monad f) => Bichannel a a' b b' f r -> Bichannel b b' a a' f r
