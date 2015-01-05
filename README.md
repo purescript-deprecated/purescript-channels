@@ -25,7 +25,7 @@
 
     toDownstream :: forall b f r a a'. (Functor f) => Channel a a' f r -> Bichannel a a' b b f r
 
-    toUpstream :: forall a f r b b'. (Functor f) => Channel b b' f r -> Bichannel a a b b' f r
+    toUpstream :: forall a f r b b'. (Monad f) => Channel b b' f r -> Bichannel a a b b' f r
 
     toWorkflow :: forall f r. (Monad f) => Biworkflow f r -> Workflow f r
 
@@ -52,7 +52,7 @@
     data Channel i o f r where
       Yield :: o -> Channel i o f r -> Terminator f r -> Channel i o f r
       Await :: (i -> Channel i o f r) -> Terminator f r -> Channel i o f r
-      ChanX :: f (Channel i o f r) -> Terminator f r -> Channel i o f r
+      ChanX :: f (Channel i o f r) -> Channel i o f r
       ChanZ :: Lazy (Channel i o f r) -> Channel i o f r
       Stop :: r -> Channel i o f r
 
@@ -73,11 +73,11 @@
 
     instance alternativeTerminator :: (Applicative f) => Alternative (Terminator f)
 
-    instance applicativeChannel :: (Applicative f) => Applicative (Channel i o f)
+    instance applicativeChannel :: (Monad f) => Applicative (Channel i o f)
 
     instance applicativeTerminator :: (Applicative f) => Applicative (Terminator f)
 
-    instance applyChannel :: (Applicative f) => Apply (Channel i o f)
+    instance applyChannel :: (Monad f) => Apply (Channel i o f)
 
     instance applyTerminator :: (Applicative f) => Apply (Terminator f)
 
@@ -118,11 +118,13 @@
 
 ### Values
 
-    await :: forall i o f. (Applicative f) => Channel i o f i
+    await :: forall i o f. (Monad f) => Channel i o f i
 
     compose :: forall a b c f r. (Monad f, Semigroup r) => Channel b c f r -> Channel a b f r -> Channel a c f r
 
     finalizer :: forall i o f r x. (Monad f) => f x -> Channel i o f r -> Channel i o f r
+
+    foldChannel :: forall i o f r z. (Monad f) => (o -> Channel i o f r -> Terminator f r -> z) -> ((i -> Channel i o f r) -> Terminator f r -> z) -> (r -> z) -> Channel i o f r -> f z
 
     loop :: forall i o f r. (Functor f) => Channel i o f r -> Channel i o f r
 
@@ -134,7 +136,7 @@
 
     runWorkflow :: forall f r. (Monad f) => Workflow f r -> f r
 
-    terminate :: forall i o f r. (Applicative f) => Channel i o f r -> Terminator f r
+    terminate :: forall i o f r. (Monad f) => Channel i o f r -> Terminator f r
 
     terminateRun :: forall i o f r. (Monad f) => Channel i o f r -> f (Maybe r)
 

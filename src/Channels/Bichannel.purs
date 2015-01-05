@@ -42,12 +42,29 @@ module Channels.Bichannel
   -- | A biworkflow, which never awaits or emits upstream or downstream values.
   type Biworkflow f r = Bichannel Z Z Z Z f r
 
+  {- 
+  tupYield :: forall a f r b b'. (Monad f) => b' -> Channel b b' f r -> Terminator f r -> Bichannel a a b b' f r
+  tupYield b' c q = terminator q (yield (Right b') *> toUpstream c)
+
+  tupAwait :: forall a f r b b'. (Monad f) => (b -> Channel b b' f r) -> Terminator f r -> Bichannel a a b b' f r
+  tupAwait h q = await >>= either (\a -> yield (Left a) *> a h q) (\b -> toUpstream (h b))
+
+  tupStop :: forall a f r b b'. (Monad f) => r -> Bichannel a a b b' f r
+  tupStop = return
+
   -- | Converts a stream to an upstream bichannel.
-  toUpstream :: forall a f r b b'. (Functor f) => Channel b b' f r -> Bichannel a a b b' f r
+  toUpstream :: forall a f r b b'. (Monad f) => Channel b b' f r -> Bichannel a a b b' f r
+  toUpstream = wrapEffect (foldChannel y a s)
+    where y = tupYield
+          a = tupAwait
+          s = tupStop
+  -} 
+
+  toUpstream :: forall a f r b b'. (Monad f) => Channel b b' f r -> Bichannel a a b b' f r
   toUpstream c = loop' c
     where loop' (Yield o c q) = Yield (Right o) (loop' c) q
           loop' c0 @ (Await h q) = Await (either (\a -> Yield (Left a) (loop' c0) q) (\b -> loop' (h b))) q
-          loop' (ChanX   x q) = ChanX (loop' <$> x) q
+          loop' (ChanX     x) = ChanX (loop' <$> x)
           loop' (ChanZ     z) = ChanZ (loop' <$> z)
           loop' (Stop      r) = Stop r
 
@@ -56,7 +73,7 @@ module Channels.Bichannel
   toDownstream c = loop' c
     where loop' (Yield o c q) = Yield (Left o) (loop' c) q
           loop' c0 @ (Await h q) = Await (either (\a -> loop' (h a)) (\b -> Yield (Right b) (loop' c0) q)) q
-          loop' (ChanX   x q) = ChanX (loop' <$> x) q
+          loop' (ChanX     x) = ChanX (loop' <$> x)
           loop' (ChanZ     z) = ChanZ (loop' <$> z)
           loop' (Stop      r) = Stop r
 
@@ -96,11 +113,9 @@ module Channels.Bichannel
     Yield (Right b'') (c1 `stack` c2) (defer1 \_ -> lift (Tuple <$> runTerminator q1 <*> terminateRun c2))
   stack c1 (Yield (Left a'') c2 q2)  = 
     Yield (Left  a'') (c1 `stack` c2) (defer1 \_ -> lift (Tuple <$> terminateRun c1 <*> runTerminator q2))
-  stack (ChanX fc1 q1) c2            = 
-    ChanX (flip stack c2 <$> fc1)     (defer1 \_ -> lift (Tuple <$> runTerminator q1 <*> terminateRun c2))
+  stack (ChanX fc1) c2               = ChanX (flip stack c2 <$> fc1)
   stack (ChanZ z1) c2                = ChanZ (flip stack c2 <$> z1)
-  stack c1 (ChanX fc2 q2)            = 
-    ChanX (stack c1 <$> fc2)          (defer1 \_ -> lift (Tuple <$> terminateRun c1 <*> runTerminator q2))
+  stack c1 (ChanX fc2)               = ChanX (stack c1 <$> fc2)
   stack c1 (ChanZ z2)                = ChanZ (stack c1 <$> z2)  
   stack (Await f1 q1) (Yield (Right b') c2 q2) = defer1 \_ -> f1 (Right b') `stack` c2
   stack (Yield (Left a') c1 q1) (Await f2 q2)  = defer1 \_ -> c1 `stack` f2 (Left a')

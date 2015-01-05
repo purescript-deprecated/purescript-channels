@@ -8,6 +8,7 @@ module Channels.Core
   , await
   , compose
   , finalizer
+  , foldChannel
   , loop
   , loopForever
   , nonTerminator
@@ -55,7 +56,7 @@ module Channels.Core
   data Channel i o f r
     = Yield o (Channel i o f r) (Terminator f r)
     | Await (i -> Channel i o f r) (Terminator f r)
-    | ChanX (f (Channel i o f r)) (Terminator f r)
+    | ChanX (f (Channel i o f r))
     | ChanZ (Lazy (Channel i o f r))
     | Stop r  
 
@@ -77,9 +78,9 @@ module Channels.Core
   compose :: forall a b c f r. (Monad f, Semigroup r) => Channel b c f r -> Channel a b f r -> Channel a c f r
   compose c1 (Await f2 q2)    = Await (compose c1 <$> f2) (q2 <> terminate c1)
   compose (Yield o c1 q1) c2  = Yield o (c1 `compose` c2) (terminate c2 <> q1)
-  compose c1 (ChanX fc2 q2)   = ChanX (compose c1 <$> fc2) (q2 <> terminate c1)
+  compose c1 (ChanX fc2)      = ChanX (compose c1 <$> fc2)
   compose c1 (ChanZ zc2)      = ChanZ (compose c1 <$> zc2)
-  compose (ChanX fc1 q1) c2   = ChanX (flip compose c2 <$> fc1) (terminate c2 <> q1)
+  compose (ChanX fc1) c2      = ChanX (flip compose c2 <$> fc1)
   compose (ChanZ zc1) c2      = ChanZ (flip compose c2 <$> zc1)
   compose (Stop r1) c2        = lift (maybe r1 (flip (<>) r1) <$> terminateRun c2)
   compose c1 (Stop r2)        = lift (maybe r2 (     (<>) r2) <$> terminateRun c1)
@@ -97,7 +98,7 @@ module Channels.Core
   runWorkflow w = loop w
     where loop (Yield _ c _) = loop c
           loop (Await   f _) = loop (f unsafeZ)
-          loop (ChanX   x _) = x >>= loop
+          loop (ChanX     x) = x >>= loop
           loop (ChanZ     z) = loop (force z)
           loop (Stop      r) = pure r
 
@@ -106,7 +107,7 @@ module Channels.Core
   loop c0 = loop' c0
     where loop' (Yield o c q) = Yield o (loop' c) q
           loop' (Await   f q) = Await (loop' <$> f) q
-          loop' (ChanX   x q) = ChanX (loop' <$> x) q
+          loop' (ChanX     x) = ChanX (loop' <$> x)
           loop' (ChanZ     z) = ChanZ (loop' <$> z)
           loop' (Stop      _) = loop' c0
 
@@ -116,12 +117,12 @@ module Channels.Core
   loopForever c0 = loop' c0
     where loop' (Yield o c q) = Yield o (loop' c) (q *> nonTerminator)
           loop' (Await   f q) = Await (loop' <$> f) (q *> nonTerminator)
-          loop' (ChanX   x q) = ChanX (loop' <$> x) (q *> nonTerminator)
+          loop' (ChanX     x) = ChanX (loop' <$> x)
           loop' (ChanZ     z) = ChanZ (loop' <$> z)
           loop' (Stop      r) = loop' c0
   
   -- | Awaits a value and monadically returns it.
-  await :: forall i o f. (Applicative f) => Channel i o f i
+  await :: forall i o f. (Monad f) => Channel i o f i
   await = Await pure nonTerminator
 
   -- | Yields a value.
@@ -130,17 +131,17 @@ module Channels.Core
 
   -- | Using the specified terminator, yields an effectful value.
   yield' :: forall i o f. (Monad f) => f o -> Channel i o f Unit
-  yield' fo = wrapEffect (yield <$> fo)
+  yield' = wrapEffect <<< ((<$>) yield)
 
   -- | Wraps an effect into the channel.
   wrapEffect :: forall i o f r. (Monad f) => f (Channel i o f r) -> Channel i o f r
-  wrapEffect fc = ChanX fc (lift fc >>= terminate)
+  wrapEffect = ChanX
 
   -- | Forcibly terminates a channel and returns a terminator.
-  terminate :: forall i o f r. (Applicative f) => Channel i o f r -> Terminator f r
+  terminate :: forall i o f r. (Monad f) => Channel i o f r -> Terminator f r
   terminate (Yield _ _ q) = q
   terminate (Await   _ q) = q
-  terminate (ChanX   _ q) = q
+  terminate (ChanX     x) = lift x >>= terminate
   terminate (ChanZ     l) = defer1 \_ -> (terminate (force l))
   terminate (Stop      r) = pure r
 
@@ -155,7 +156,7 @@ module Channels.Core
     where
       loop (Yield o c q1) = Yield o (loop c) (q1 *> q2)
       loop (Await   f q1) = Await (loop <$> f) (q1 *> q2)
-      loop (ChanX   x q1) = ChanX (loop <$> x) (q1 *> q2)
+      loop (ChanX      x) = ChanX (loop <$> x)
       loop (ChanZ      z) = ChanZ (loop <$> z)
       loop (Stop       r) = Stop r
 
@@ -169,9 +170,22 @@ module Channels.Core
 
       loop (Yield o c q) = Yield o (loop c) (x' *> q)
       loop (Await   f q) = Await (loop <$> f) (x' *> q)
-      loop (ChanX   x q) = ChanX (loop <$> x) (x' *> q)
+      loop (ChanX     x) = ChanX (loop <$> x)
       loop (ChanZ     z) = ChanZ (loop <$> z)
       loop (Stop      r) = lift x *> Stop r
+
+  foldChannel :: forall i o f r z. (Monad f) => 
+    (o -> Channel i o f r -> Terminator f r -> z) -> 
+    ((i -> Channel i o f r) -> Terminator f r -> z) -> 
+    (r -> z) -> 
+    Channel i o f r ->
+    f z
+  foldChannel y a s = loop
+    where loop (Yield o c q) = pure (y o c q)
+          loop (Await   h q) = pure (a h q)
+          loop (ChanX     x) = x >>= loop
+          loop (ChanZ     z) = loop (force z)
+          loop (Stop      r) = pure (s r)
 
   stopUnit :: forall i o f. Channel i o f Unit
   stopUnit = Stop unit
@@ -248,38 +262,38 @@ module Channels.Core
   instance functorChannel :: (Functor f) => Functor (Channel i o f) where
     (<$>) f (Yield o c q) = Yield o (f <$> c) (f <$> q)
     (<$>) f (Await   g q) = Await ((<$>) f <$> g) (f <$> q)
-    (<$>) f (ChanX   x q) = ChanX ((<$>) f <$> x) (f <$> q)
+    (<$>) f (ChanX     x) = ChanX ((<$>) f <$> x)
     (<$>) f (ChanZ     z) = ChanZ ((<$>) f <$> z)
     (<$>) f (Stop      r) = Stop (f r)
 
   instance semigroupChannel :: (Applicative f, Semigroup r) => Semigroup (Channel io io f r) where
     (<>) (Yield o c q) w = Yield o (c <> w) q
     (<>) (Await   f q) w = Await (flip (<>) w <$> f) q
-    (<>) (ChanX   x q) w = ChanX (flip (<>) w <$> x) q
+    (<>) (ChanX     x) w = ChanX (flip (<>) w <$> x)
     (<>) (ChanZ     z) w = ChanZ (flip (<>) w <$> z)
     (<>) (Stop      r) w = (<>) r <$> w
 
   instance monoidChannel :: (Applicative f, Monoid r) => Monoid (Channel io io f r) where
     mempty = Stop mempty 
 
-  instance applyChannel :: (Applicative f) => Apply (Channel i o f) where
+  instance applyChannel :: (Monad f) => Apply (Channel i o f) where
     (<*>) (Yield o c q) w = Yield o (c <*> w) (q <*> terminate w)
     (<*>) (Await   g q) w = Await (flip (<*>) w <$> g) (q <*> terminate w)
-    (<*>) (ChanX   x q) w = ChanX (flip (<*>) w <$> x) (q <*> terminate w)
+    (<*>) (ChanX     x) w = ChanX (flip (<*>) w <$> x)
     (<*>) (ChanZ     z) w = ChanZ (flip (<*>) w <$> z)
     (<*>) v @ (Stop f) (Yield o c q) = Yield o (v <*> c) (pure f <*> q)
     (<*>) v @ (Stop f) (Await  g q)  = Await ((<*>) v <$> g) (pure f <*> q)
-    (<*>) v @ (Stop f) (ChanX  x q)  = ChanX ((<*>) v <$> x) (pure f <*> q)
+    (<*>) v @ (Stop f) (ChanX    x)  = ChanX ((<*>) v <$> x)
     (<*>) v @ (Stop f) (ChanZ    z)  = ChanZ ((<*>) v <$> z)
     (<*>) v @ (Stop f) (Stop     x)  = Stop (f x)
 
-  instance applicativeChannel :: (Applicative f) => Applicative (Channel i o f) where
+  instance applicativeChannel :: (Monad f) => Applicative (Channel i o f) where
     pure r = Stop r
 
   instance bindChannel :: (Monad f) => Bind (Channel i o f) where
     (>>=) (Yield o c q) f = Yield o (c >>= f) (q >>= (terminate <$> f))
     (>>=) (Await   g q) f = Await (flip (>>=) f <$> g) (q >>= (terminate <$> f))
-    (>>=) (ChanX   x q) f = ChanX (flip (>>=) f <$> x) (q >>= (terminate <$> f))
+    (>>=) (ChanX     x) f = ChanX (flip (>>=) f <$> x)
     (>>=) (ChanZ     z) f = ChanZ (flip (>>=) f <$> z)
     (>>=) (Stop      r) f = f r
 

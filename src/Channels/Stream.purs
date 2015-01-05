@@ -26,7 +26,7 @@ module Channels.Stream
     dimap f g (Stream c) = Stream (dimap' c)
       where dimap' (Yield o c q) = Yield (g o) (dimap' c) q
             dimap' (Await   h q) = Await (f >>> (dimap' <$> h)) q
-            dimap' (ChanX   x q) = ChanX (dimap' <$> x) q
+            dimap' (ChanX     x) = ChanX (dimap' <$> x)
             dimap' (ChanZ     z) = ChanZ (dimap' <$> z)
             dimap' (Stop      r) = Stop r
 
