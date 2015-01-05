@@ -174,18 +174,20 @@ module Channels.Core
       loop (ChanZ     z) = ChanZ (loop <$> z)
       loop (Stop      r) = lift x *> Stop r
 
+  -- | Folds over the top-level structure of the channel to produce a value.
+  -- | Note that this currently destroys laziness (!).
   foldChannel :: forall i o f r z. (Monad f) => 
     (o -> Channel i o f r -> Terminator f r -> z) -> 
     ((i -> Channel i o f r) -> Terminator f r -> z) -> 
     (r -> z) -> 
     Channel i o f r ->
     f z
-  foldChannel y a s = loop
-    where loop (Yield o c q) = pure (y o c q)
-          loop (Await   h q) = pure (a h q)
+  foldChannel yieldF awaitF stopF = loop
+    where loop (Yield o c q) = pure (yieldF o c q)
+          loop (Await   h q) = pure (awaitF h q)
           loop (ChanX     x) = x >>= loop
           loop (ChanZ     z) = loop (force z)
-          loop (Stop      r) = pure (s r)
+          loop (Stop      r) = pure (stopF r)
 
   stopUnit :: forall i o f. Channel i o f Unit
   stopUnit = Stop unit
