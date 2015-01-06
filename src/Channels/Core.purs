@@ -1,5 +1,5 @@
 module Channels.Core
-  ( Channel(..)
+  ( Channel()
   , Terminator()
   , Sink(..)
   , Source(..)
@@ -8,6 +8,10 @@ module Channels.Core
   , (!:)
   , await
   , compose
+  , feed
+  , feed'
+  , feedAll
+  , feedAll'
   , finalizer
   , foldChannel
   , loop
@@ -27,7 +31,7 @@ module Channels.Core
   import Data.Traversable(Traversable, traverse, sequence)
   import Data.Maybe(Maybe(..), maybe)
   import Data.Monoid(Monoid, mempty)
-  import Data.Tuple(Tuple(..))
+  import Data.Tuple(Tuple(..), snd)
   import Data.Lazy(Lazy(..), force, defer)
     
   import Control.Alt
@@ -134,6 +138,33 @@ module Channels.Core
   -- | Using the specified terminator, yields an effectful value.
   yield' :: forall i o f. (Monad f) => f o -> Channel i o f Unit
   yield' = wrapEffect <<< ((<$>) yield)
+
+  -- | Feeds a value to the channel. If the channel terminates before it 
+  -- | awaits the value, the value will be monadically returned.
+  feed :: forall i o f r. (Monad f) => i -> Channel i o f r -> Channel i o f (Tuple [i] r)
+  feed i = feedAll [i]
+
+  -- | Feeds a value to the channel. If the channel terminates before it 
+  -- | awaits the value, the value will be discarded.
+  feed' :: forall i o f r. (Monad f) => i -> Channel i o f r -> Channel i o f r
+  feed' i = feedAll' [i]
+
+  -- | Feeds values to the channel. If the channel terminates before it 
+  -- | awaits all the values, the unused values will be monadically returned.
+  feedAll :: forall i o f r. (Monad f) => [i] -> Channel i o f r -> Channel i o f (Tuple [i] r)
+  feedAll = loop'
+    where 
+      loop'       []             c = Tuple [] <$> c
+      loop'       is (Yield o c q) = Yield o (loop' is c) (Tuple is <$> q)
+      loop' (i : is) (Await   f q) = feedAll is (f i)
+      loop'       is (ChanX     x) = ChanX (loop' is <$> x)
+      loop'       is (ChanZ     z) = ChanZ (loop' is <$> z)
+      loop'       is (Stop      r) = Stop (Tuple is r)
+
+  -- | Feeds values to the channel. If the channel terminates before it 
+  -- | awaits all the values, the unused values will be discarded.
+  feedAll' :: forall i o f r. (Monad f) => [i] -> Channel i o f r -> Channel i o f r
+  feedAll' is = (<$>) snd <<< feedAll is
 
   -- | Wraps an effect into the channel.
   wrapEffect :: forall i o f r. (Monad f) => f (Channel i o f r) -> Channel i o f r

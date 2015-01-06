@@ -83,19 +83,26 @@ module Channels.Bichannel
   -- | Laziness is introduced when the two channels pass messages between each
   -- | other. This allows channels to be stacked even when all they do is 
   -- | forever pass each other messages (e.g. stacking a source on a sink).
+  foreign import hole :: forall a. a
+
   stack :: forall a a' a'' b b' b'' f r r'. (Monad f) => Bichannel a a' b' b'' f r -> Bichannel a' a'' b b' f r' -> Bichannel a a'' b b'' f (Tuple (Maybe r) (Maybe r'))
-  stack (Stop r1) c2                 = lift (Tuple (Just r1) <$> runTerminator (terminate c2))
-  stack c1 (Stop r2)                 = lift (flip Tuple (Just r2) <$> terminateRun c1)
-  stack (Yield (Right b'') c1 q1) c2 = 
-    Yield (Right b'') (c1 `stack` c2) (defer1 \_ -> lift (Tuple <$> runTerminator q1 <*> terminateRun c2))
-  stack c1 (Yield (Left a'') c2 q2)  = 
-    Yield (Left  a'') (c1 `stack` c2) (defer1 \_ -> lift (Tuple <$> terminateRun c1 <*> runTerminator q2))
-  stack (ChanX fc1) c2               = ChanX (flip stack c2 <$> fc1)
-  stack (ChanZ z1) c2                = ChanZ (flip stack c2 <$> z1)
-  stack c1 (ChanX fc2)               = ChanX (stack c1 <$> fc2)
-  stack c1 (ChanZ z2)                = ChanZ (stack c1 <$> z2)  
-  stack (Await f1 q1) (Yield (Right b') c2 q2) = defer1 \_ -> f1 (Right b') `stack` c2
-  stack (Yield (Left a') c1 q1) (Await f2 q2)  = defer1 \_ -> c1 `stack` f2 (Left a')
+  stack c1_ c2 = wrapEffect (foldChannel yieldF1 awaitF1 stopF1 c1_)
+    where 
+      yieldF1 e1 c1 q1  = either (\a' -> 
+                                  let yieldF2 e2 c2 q2 = either (\a'' -> yield (Left a'') !: void q2 *> c1_ `stack` c2) 
+                                                                (\b'  -> feed' (Right b') c1 `stack` feed' (Left a') c2) e2
+                                      awaitF2    f2  _ = c1 `stack` f2 (Left a')
+                                      stopF2        r2 = lift (flip Tuple (Just r2) <$> terminateRun c1)
+                                  in wrapEffect (foldChannel yieldF2 awaitF2 stopF2 c2)) 
+                                 (\b'' -> yield (Right b'') !: void q1 *> c1 `stack` c2) e1 
+
+      awaitF1    f1 q1  = let yieldF2 e2 c2 q2 = either (\a'' -> yield (Left a'') !: void q2 *> c1_ `stack` c2) 
+                                                        (\b' -> f1 (Right b') `stack` c2) e2
+                              awaitF2    f2 q2 = await >>= either (\a -> f1 (Left a) `stack` c2) (\b -> c1_ `stack` f2 (Right b))
+                              stopF2        r2 = lift (flip Tuple (Just r2) <$> terminateRun c1_)
+                          in wrapEffect (foldChannel yieldF2 awaitF2 stopF2 c2)
+
+      stopF1        r1  = lift (Tuple (Just r1) <$> terminateRun c2)
 
   -- | Converts a biworkflow to a workflow.
   toWorkflow :: forall f r. (Monad f) => Biworkflow f r -> Workflow f r

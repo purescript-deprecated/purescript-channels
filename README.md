@@ -49,12 +49,7 @@
 
 ### Types
 
-    data Channel i o f r where
-      Yield :: o -> Channel i o f r -> Terminator f r -> Channel i o f r
-      Await :: (i -> Channel i o f r) -> Terminator f r -> Channel i o f r
-      ChanX :: f (Channel i o f r) -> Channel i o f r
-      ChanZ :: Lazy (Channel i o f r) -> Channel i o f r
-      Stop :: r -> Channel i o f r
+    data Channel i o f r
 
     type Sink i f r = Channel i Z f r
 
@@ -123,6 +118,10 @@
     await :: forall i o f. (Monad f) => Channel i o f i
 
     compose :: forall a b c f r. (Monad f, Semigroup r) => Channel b c f r -> Channel a b f r -> Channel a c f r
+
+    feed :: forall i o f r. (Monad f) => i -> Channel i o f r -> Channel i o f (Tuple [i] r)
+
+    feed' :: forall i o f r. (Monad f) => i -> Channel i o f r -> Channel i o f r
 
     finalizer :: forall i o f r x. (Monad f) => f x -> Channel i o f r -> Channel i o f r
 
