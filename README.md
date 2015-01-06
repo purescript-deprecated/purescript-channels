@@ -123,6 +123,10 @@
 
     feed' :: forall i o f r. (Monad f) => i -> Channel i o f r -> Channel i o f r
 
+    feedAll :: forall i o f r. (Monad f) => [i] -> Channel i o f r -> Channel i o f (Tuple [i] r)
+
+    feedAll' :: forall i o f r. (Monad f) => [i] -> Channel i o f r -> Channel i o f r
+
     finalizer :: forall i o f r x. (Monad f) => f x -> Channel i o f r -> Channel i o f r
 
     foldChannel :: forall i o f r z. (Monad f) => (o -> Channel i o f r -> Terminator f r -> z) -> ((i -> Channel i o f r) -> Terminator f r -> z) -> (r -> z) -> Channel i o f r -> f z
