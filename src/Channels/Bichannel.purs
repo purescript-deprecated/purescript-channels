@@ -95,7 +95,7 @@ module Channels.Bichannel
                                  (\b'' -> yield (Right b'') !: void q1 *> c1 `stack` c2) e1 
 
       awaitF1    f1 q1  = let yieldF2 e2 c2 q2 = either (\a'' -> yield (Left a'') !: void q2 *> c1_ `stack` c2) 
-                                                        (\b' -> defer1 \_ -> f1 (Right b') `stack` c2) e2
+                                                        (\b'  -> defer1 \_ -> f1 (Right b') `stack` c2) e2
                               awaitF2    f2 q2 = await >>= either (\a -> f1 (Left a) `stack` c2) (\b -> c1_ `stack` f2 (Right b))
                               stopF2        r2 = lift (flip Tuple (Just r2) <$> terminateRun c1_)
                           in wrapEffect (foldChannel yieldF2 awaitF2 stopF2 c2)
