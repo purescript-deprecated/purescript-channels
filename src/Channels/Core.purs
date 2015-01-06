@@ -71,7 +71,7 @@ module Channels.Core
 
   foreign import unsafeZ "var unsafeZ = undefined;" :: Z
 
-  infixl 1 !:
+  infixl 4 !:
 
   nonTerminator :: forall f a. Terminator f a
   nonTerminator = TerE

@@ -45,13 +45,13 @@ module Channels.Bichannel
   -- | Converts a stream to an upstream bichannel.
   toUpstream :: forall a f r b b'. (Monad f) => Channel b b' f r -> Bichannel a a b b' f r
   toUpstream = wrapEffect <<< foldChannel yieldF awaitF return
-    where yieldF b' c q = (yield (Right b') !: void q) *> toUpstream c
+    where yieldF b' c q = yield (Right b') !: void q *> toUpstream c
           awaitF    h q = await >>= either (\a -> yield (Left a) *> awaitF h q) (\b -> toUpstream (h b))
 
   -- | Converts a stream to a downstream bichannel.
   toDownstream :: forall b f r a a'. (Monad f) => Channel a a' f r -> Bichannel a a' b b f r
   toDownstream = wrapEffect <<< foldChannel yieldF awaitF return
-    where yieldF a' c q = (yield (Left a') !: void q) *> toDownstream c
+    where yieldF a' c q = yield (Left a') !: void q *> toDownstream c
           awaitF    h q = await >>= either (\a -> toDownstream (h a)) (\b -> yield (Right b) *> awaitF h q)
 
   -- | Flips the upstream and downstream channels of the bichannel.

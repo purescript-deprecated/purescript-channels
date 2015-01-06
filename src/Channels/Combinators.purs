@@ -13,8 +13,8 @@ module Channels.Combinators where
 
   -- | Lifts a pure function to a channel.
   moore :: forall i o f. (Monad f) => (i -> o) -> Channel i o f Unit
-  moore f = loop $ await >>= (f >>> yield) !: pure unit
+  moore f = loop $ (await >>= (f >>> yield)) !: pure unit
 
   -- | Lifts an effectful function to a channel.
   moore' :: forall i o f. (Monad f) => (i -> f o) -> Channel i o f Unit
-  moore' f = loop $ await >>= (f >>> yield') !: pure unit
+  moore' f = loop $ (await >>= (f >>> yield')) !: pure unit
