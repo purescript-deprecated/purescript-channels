@@ -5,6 +5,8 @@ module Channels.Stream
 
   import Data.Monoid(Monoid, mempty) 
   import Data.Profunctor
+
+  import Control.Apply
   import Control.Lazy(defer1)
 
   import Channels.Core
@@ -23,11 +25,8 @@ module Channels.Stream
     id = Stream (loopForever (await >>= yield))
 
   instance profunctorStream :: (Monad f) => Profunctor (Stream f r) where
-    dimap f g (Stream c) = Stream (dimap' c)
-      where dimap' (Yield o c q) = Yield (g o) (dimap' c) q
-            dimap' (Await   h q) = Await (f >>> (dimap' <$> h)) q
-            dimap' (ChanX     x) = ChanX (dimap' <$> x)
-            dimap' (ChanZ     z) = ChanZ (dimap' <$> z)
-            dimap' (Stop      r) = Stop r
-
+    dimap f g (Stream c) = Stream (loop c)
+      where yieldF o c q = (yield (g o) !: void q) *> loop c
+            awaitF   h q = await >>= (f >>> (loop <$> h))
+            loop       c = wrapEffect (foldChannel yieldF awaitF pure c)
   

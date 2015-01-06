@@ -5,6 +5,7 @@ module Channels.Core
   , Source(..)
   , Workflow(..)
   , Z()
+  , (!:)
   , await
   , compose
   , finalizer
@@ -16,7 +17,6 @@ module Channels.Core
   , runWorkflow
   , terminate
   , terminateRun
-  , terminator
   , wrapEffect
   , yield
   , yield'
@@ -70,6 +70,8 @@ module Channels.Core
   type Workflow f r = Channel Z Z f r
 
   foreign import unsafeZ "var unsafeZ = undefined;" :: Z
+
+  infixl 1 !:
 
   nonTerminator :: forall f a. Terminator f a
   nonTerminator = TerE
@@ -151,8 +153,8 @@ module Channels.Core
 
   -- | Replaces the value that the channel will produce if forcibly terminated.
   -- | Preserves any effects associated with the old terminator.
-  terminator :: forall i o f r. (Applicative f) => Terminator f r -> Channel i o f r -> Channel i o f r
-  terminator q2 = loop
+  (!:) :: forall i o f r. (Applicative f) => Channel i o f r -> Terminator f r -> Channel i o f r
+  (!:) c q2 = loop c
     where
       loop (Yield o c q1) = Yield o (loop c) (q1 *> q2)
       loop (Await   f q1) = Await (loop <$> f) (q1 *> q2)
