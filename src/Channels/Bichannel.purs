@@ -82,22 +82,26 @@ module Channels.Bichannel
   -- |
   -- | Laziness is introduced when channels communicate to each other as a way
   -- | of avoiding stack overflows. Of course, for long-running computations, 
-  -- | the base monad must also be trampolined to avoid overlowing the stack.
+  -- | the base monad must also be trampolined to avoid overflowing the stack.
   stack :: forall a a' a'' b b' b'' f r r'. (Monad f) => Bichannel a a' b' b'' f r -> Bichannel a' a'' b b' f r' -> Bichannel a a'' b b'' f (Tuple (Maybe r) (Maybe r'))
-  stack c1_ c2 = wrapEffect (foldChannel yieldF1 awaitF1 stopF1 c1_)
+  stack c1 c2 = wrapEffect (foldChannel yieldF1 awaitF1 stopF1 c1)
     where 
       yieldF1 e1 c1 q1  = either (\a' -> 
-                                  let yieldF2 e2 c2 q2 = either (\a'' -> yield (Left a'') !: void q2 *> c1_ `stack` c2) 
+                                  let yieldF2 e2 c2 q2 = either (\a'' -> yield (Left a'') !: void q2 *> 
+                                                                        (yield (Left a') *> c1) `stack` c2) 
                                                                 (\b'  -> feed' (Right b') c1 `stack` feed' (Left a') c2) e2
                                       awaitF2    f2  _ = defer1 \_ -> c1 `stack` f2 (Left a')
-                                      stopF2        r2 = lift (flip Tuple (Just r2) <$> terminateRun c1)
+                                      stopF2        r2 = lift (flip Tuple (Just r2) <$> runTerminator q1)
                                   in wrapEffect (foldChannel yieldF2 awaitF2 stopF2 c2)) 
                                  (\b'' -> yield (Right b'') !: void q1 *> c1 `stack` c2) e1 
 
-      awaitF1    f1 q1  = let yieldF2 e2 c2 q2 = either (\a'' -> yield (Left a'') !: void q2 *> c1_ `stack` c2) 
+      awaitF1    f1 q1  = let c1 = await >>= f1 -- q1
+
+                              yieldF2 e2 c2 q2 = either (\a'' -> yield (Left a'') !: void q2 *> c1 `stack` c2) 
                                                         (\b'  -> defer1 \_ -> f1 (Right b') `stack` c2) e2
-                              awaitF2    f2 q2 = await >>= either (\a -> f1 (Left a) `stack` c2) (\b -> c1_ `stack` f2 (Right b))
-                              stopF2        r2 = lift (flip Tuple (Just r2) <$> terminateRun c1_)
+                              awaitF2    f2 q2 = await >>= either (\a -> f1 (Left a) `stack` c2) 
+                                                                  (\b -> c1 `stack` f2 (Right b))
+                              stopF2        r2 = lift (flip Tuple (Just r2) <$> runTerminator q1)
                           in wrapEffect (foldChannel yieldF2 awaitF2 stopF2 c2)
 
       stopF1        r1  = lift (Tuple (Just r1) <$> terminateRun c2)
