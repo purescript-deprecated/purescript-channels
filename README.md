@@ -152,15 +152,6 @@
     yield' :: forall i o f. (Monad f) => f o -> Channel i o f Unit
 
 
-## Module Channels.State
-
-### Values
-
-    stateMachine :: forall s i o f. (Monad f) => (s -> i -> Tuple s [o]) -> s -> Channel i o f s
-
-    stateMachine' :: forall s i o f. (Monad f) => (s -> i -> f (Tuple s [o])) -> s -> Channel i o f s
-
-
 ## Module Channels.Stream
 
 ### Types
