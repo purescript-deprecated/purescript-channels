@@ -24,315 +24,309 @@ module Channels.Core
   , wrapEffect
   , yield
   , yield'
-  ) where 
+  ) where
 
-  import Data.Array((!!))
-  import Data.Foldable(Foldable, foldl, foldr, foldMap)
-  import Data.Traversable(Traversable, traverse, sequence)
-  import Data.Maybe(Maybe(..), maybe)
-  import Data.Monoid(Monoid, mempty)
-  import Data.Tuple(Tuple(..), snd)
-  import Data.Lazy(Lazy(..), force, defer)
-    
-  import Control.Alt
-  import Control.Alternative(Alternative)
-  import Control.Apply
-  import Control.Bind
-  import Control.Lazy(Lazy1, defer1)
-  import Control.Monad.Trans(MonadTrans, lift)
-  import Control.MonadPlus(MonadPlus)
-  import Control.Plus
+import Control.Alt (Alt, (<|>))
+import Control.Alternative (Alternative)
+import Control.Apply ((*>))
+import Control.Monad.Trans (MonadTrans, lift)
+import Control.Plus (Plus)
+import Data.Lazy (Lazy(..), force, defer)
+import Data.Maybe (Maybe(..), maybe)
+import Data.Monoid (Monoid, mempty)
+import Data.Tuple (Tuple(..), snd)
+import qualified Control.Lazy as CL
 
-  foreign import data Z :: *
+foreign import data Z :: *
 
-  -- | A channel terminator, which may terminate with a value, or refuse to 
-  -- | terminate. Termination can be accompanied by effects, including 
-  -- | laziness or `f` effects.
-  data Terminator f a = TerP a | TerE | TerX (f (Terminator f a)) | TerZ (Lazy (Terminator f a))
+-- | A channel terminator, which may terminate with a value, or refuse to
+-- | terminate. Termination can be accompanied by effects, including
+-- | laziness or `f` effects.
+data Terminator f a = TerP a | TerE | TerX (f (Terminator f a)) | TerZ (Lazy (Terminator f a))
 
-  -- | An event-driven channel of communication with a well-defined lifecycle.
-  -- | 
-  -- | Channels may yield output values, await input values, execute effects, 
-  -- | defer computation of a channel, and voluntarily terminate with a final
-  -- | result value `r`.
-  -- |
-  -- | All channels may be forcefully terminated to produce an `f (Maybe r)`.
-  data Channel i o f r
-    = Yield o (Channel i o f r) (Terminator f r)
-    | Await (i -> Channel i o f r) (Terminator f r)
-    | ChanX (f (Channel i o f r))
-    | ChanZ (Lazy (Channel i o f r))
-    | Stop r  
+-- | An event-driven channel of communication with a well-defined lifecycle.
+-- |
+-- | Channels may yield output values, await input values, execute effects,
+-- | defer computation of a channel, and voluntarily terminate with a final
+-- | result value `r`.
+-- |
+-- | All channels may be forcefully terminated to produce an `f (Maybe r)`.
+data Channel i o f r
+  = Yield o (Channel i o f r) (Terminator f r)
+  | Await (i -> Channel i o f r) (Terminator f r)
+  | ChanX (f (Channel i o f r))
+  | ChanZ (Lazy (Channel i o f r))
+  | Stop r
 
-  -- | A source of values, which awaits nothing.
-  type Source o f r = Channel Z o f r
+-- | A source of values, which awaits nothing.
+type Source o f r = Channel Z o f r
 
-  -- | A sink of values, which emits nothing.
-  type Sink i f r = Channel i Z f r
+-- | A sink of values, which emits nothing.
+type Sink i f r = Channel i Z f r
 
-  -- | A workflow consists of a source composed with a sink.
-  type Workflow f r = Channel Z Z f r
+-- | A workflow consists of a source composed with a sink.
+type Workflow f r = Channel Z Z f r
 
-  foreign import unsafeZ "var unsafeZ = undefined;" :: Z
+foreign import unsafeZ "var unsafeZ = undefined;" :: Z
 
-  infixl 4 !:
+infixl 4 !:
 
-  nonTerminator :: forall f a. Terminator f a
-  nonTerminator = TerE
+nonTerminator :: forall f a. Terminator f a
+nonTerminator = TerE
 
-  -- | Pipes the output of one channel to the input of another.
-  compose :: forall a b c f r. (Monad f, Semigroup r) => Channel b c f r -> Channel a b f r -> Channel a c f r
-  compose c1 (Await f2 q2)    = Await (compose c1 <$> f2) (q2 <> terminate c1)
-  compose (Yield o c1 q1) c2  = Yield o (c1 `compose` c2) (terminate c2 <> q1)
-  compose c1 (ChanX fc2)      = ChanX (compose c1 <$> fc2)
-  compose c1 (ChanZ zc2)      = ChanZ (compose c1 <$> zc2)
-  compose (ChanX fc1) c2      = ChanX (flip compose c2 <$> fc1)
-  compose (ChanZ zc1) c2      = ChanZ (flip compose c2 <$> zc1)
-  compose (Stop r1) c2        = lift (maybe r1 (flip (<>) r1) <$> terminateRun c2)
-  compose c1 (Stop r2)        = lift (maybe r2 (     (<>) r2) <$> terminateRun c1)
-  compose (Await f1 _) (Yield o c2 _) = defer1 \_ -> f1 o `compose` c2
+-- | Pipes the output of one channel to the input of another.
+compose :: forall a b c f r. (Monad f, Semigroup r) => Channel b c f r -> Channel a b f r -> Channel a c f r
+compose c1 (Await f2 q2)    = Await (compose c1 <$> f2) (q2 <> terminate c1)
+compose (Yield o c1 q1) c2  = Yield o (c1 `compose` c2) (terminate c2 <> q1)
+compose c1 (ChanX fc2)      = ChanX (compose c1 <$> fc2)
+compose c1 (ChanZ zc2)      = ChanZ (compose c1 <$> zc2)
+compose (ChanX fc1) c2      = ChanX (flip compose c2 <$> fc1)
+compose (ChanZ zc1) c2      = ChanZ (flip compose c2 <$> zc1)
+compose (Stop r1) c2        = lift (maybe r1 (flip (<>) r1) <$> terminateRun c2)
+compose c1 (Stop r2)        = lift (maybe r2 (     (<>) r2) <$> terminateRun c1)
+compose (Await f1 _) (Yield o c2 _) = CL.defer \_ -> f1 o `compose` c2
 
-  -- | Runs an terminator to produce an `f (Maybe a)`.
-  runTerminator :: forall f a. (Monad f) => Terminator f a -> f (Maybe a)
-  runTerminator (TerP  a) = pure (Just a)
-  runTerminator TerE      = pure (Nothing)
-  runTerminator (TerX fa) = fa >>= runTerminator
-  runTerminator (TerZ ef) = runTerminator (force ef)
+-- | Runs an terminator to produce an `f (Maybe a)`.
+runTerminator :: forall f a. (Monad f) => Terminator f a -> f (Maybe a)
+runTerminator (TerP  a) = pure (Just a)
+runTerminator TerE      = pure (Nothing)
+runTerminator (TerX fa) = fa >>= runTerminator
+runTerminator (TerZ ef) = runTerminator (force ef)
 
-  -- | Runs a workflow to completion. TODO: stack overflow.
-  runWorkflow :: forall f r. (Monad f) => Workflow f r -> f r
-  runWorkflow w = loop w
-    where loop (Yield _ c _) = loop c
-          loop (Await   f _) = loop (f unsafeZ)
-          loop (ChanX     x) = x >>= loop
-          loop (ChanZ     z) = loop (force z)
-          loop (Stop      r) = pure r
+-- | Runs a workflow to completion. TODO: stack overflow.
+runWorkflow :: forall f r. (Monad f) => Workflow f r -> f r
+runWorkflow w = loop w
+  where loop (Yield _ c _) = loop c
+        loop (Await   f _) = loop (f unsafeZ)
+        loop (ChanX     x) = x >>= loop
+        loop (ChanZ     z) = loop (force z)
+        loop (Stop      r) = pure r
 
-  -- | Returns a looping channel that restarts when it reaches the end.
-  loop :: forall i o f r. (Functor f) => Channel i o f r -> Channel i o f r
-  loop c0 = loop' c0
-    where loop' (Yield o c q) = Yield o (loop' c) q
-          loop' (Await   f q) = Await (loop' <$> f) q
-          loop' (ChanX     x) = ChanX (loop' <$> x)
-          loop' (ChanZ     z) = ChanZ (loop' <$> z)
-          loop' (Stop      _) = loop' c0
+-- | Returns a looping channel that restarts when it reaches the end.
+loop :: forall i o f r. (Functor f) => Channel i o f r -> Channel i o f r
+loop c0 = loop' c0
+  where loop' (Yield o c q) = Yield o (loop' c) q
+        loop' (Await   f q) = Await (loop' <$> f) q
+        loop' (ChanX     x) = ChanX (loop' <$> x)
+        loop' (ChanZ     z) = ChanZ (loop' <$> z)
+        loop' (Stop      _) = loop' c0
 
 
-  -- | Returns a looping channel that will refuse to terminate.
-  loopForever :: forall i o f r r'. (Monad f) => Channel i o f r -> Channel i o f r'
-  loopForever c0 = loop' c0
-    where loop' (Yield o c q) = Yield o (loop' c) (q *> nonTerminator)
-          loop' (Await   f q) = Await (loop' <$> f) (q *> nonTerminator)
-          loop' (ChanX     x) = ChanX (loop' <$> x)
-          loop' (ChanZ     z) = ChanZ (loop' <$> z)
-          loop' (Stop      r) = loop' c0
-  
-  -- | Awaits a value and monadically returns it.
-  await :: forall i o f. (Monad f) => Channel i o f i
-  await = Await pure nonTerminator
+-- | Returns a looping channel that will refuse to terminate.
+loopForever :: forall i o f r r'. (Monad f) => Channel i o f r -> Channel i o f r'
+loopForever c0 = loop' c0
+  where loop' (Yield o c q) = Yield o (loop' c) (q *> nonTerminator)
+        loop' (Await   f q) = Await (loop' <$> f) (q *> nonTerminator)
+        loop' (ChanX     x) = ChanX (loop' <$> x)
+        loop' (ChanZ     z) = ChanZ (loop' <$> z)
+        loop' (Stop      r) = loop' c0
 
-  -- | Yields a value.
-  yield :: forall i o f. (Applicative f) => o -> Channel i o f Unit
-  yield o = Yield o stopUnit terminatorUnit
+-- | Awaits a value and monadically returns it.
+await :: forall i o f. (Monad f) => Channel i o f i
+await = Await pure nonTerminator
 
-  -- | Using the specified terminator, yields an effectful value.
-  yield' :: forall i o f. (Monad f) => f o -> Channel i o f Unit
-  yield' = wrapEffect <<< ((<$>) yield)
+-- | Yields a value.
+yield :: forall i o f. (Applicative f) => o -> Channel i o f Unit
+yield o = Yield o stopUnit terminatorUnit
 
-  -- | Feeds a value to the channel. If the channel terminates before it 
-  -- | awaits the value, the value will be monadically returned.
-  feed :: forall i o f r. (Monad f) => i -> Channel i o f r -> Channel i o f (Tuple [i] r)
-  feed i = feedAll [i]
+-- | Using the specified terminator, yields an effectful value.
+yield' :: forall i o f. (Monad f) => f o -> Channel i o f Unit
+yield' = wrapEffect <<< ((<$>) yield)
 
-  -- | Feeds a value to the channel. If the channel terminates before it 
-  -- | awaits the value, the value will be discarded.
-  feed' :: forall i o f r. (Monad f) => i -> Channel i o f r -> Channel i o f r
-  feed' i = feedAll' [i]
+-- | Feeds a value to the channel. If the channel terminates before it
+-- | awaits the value, the value will be monadically returned.
+feed :: forall i o f r. (Monad f) => i -> Channel i o f r -> Channel i o f (Tuple [i] r)
+feed i = feedAll [i]
 
-  -- | Feeds values to the channel. If the channel terminates before it 
-  -- | awaits all the values, the unused values will be monadically returned.
-  feedAll :: forall i o f r. (Monad f) => [i] -> Channel i o f r -> Channel i o f (Tuple [i] r)
-  feedAll = loop'
-    where 
-      loop'       []             c = Tuple [] <$> c
-      loop'       is (Yield o c q) = Yield o (loop' is c) (Tuple is <$> q)
-      loop' (i : is) (Await   f q) = feedAll is (f i)
-      loop'       is (ChanX     x) = ChanX (loop' is <$> x)
-      loop'       is (ChanZ     z) = ChanZ (loop' is <$> z)
-      loop'       is (Stop      r) = Stop (Tuple is r)
+-- | Feeds a value to the channel. If the channel terminates before it
+-- | awaits the value, the value will be discarded.
+feed' :: forall i o f r. (Monad f) => i -> Channel i o f r -> Channel i o f r
+feed' i = feedAll' [i]
 
-  -- | Feeds values to the channel. If the channel terminates before it 
-  -- | awaits all the values, the unused values will be discarded.
-  feedAll' :: forall i o f r. (Monad f) => [i] -> Channel i o f r -> Channel i o f r
-  feedAll' is = (<$>) snd <<< feedAll is
+-- | Feeds values to the channel. If the channel terminates before it
+-- | awaits all the values, the unused values will be monadically returned.
+feedAll :: forall i o f r. (Monad f) => [i] -> Channel i o f r -> Channel i o f (Tuple [i] r)
+feedAll = loop'
+  where
+    loop'       []             c = Tuple [] <$> c
+    loop'       is (Yield o c q) = Yield o (loop' is c) (Tuple is <$> q)
+    loop' (i : is) (Await   f q) = feedAll is (f i)
+    loop'       is (ChanX     x) = ChanX (loop' is <$> x)
+    loop'       is (ChanZ     z) = ChanZ (loop' is <$> z)
+    loop'       is (Stop      r) = Stop (Tuple is r)
 
-  -- | Wraps an effect into the channel.
-  wrapEffect :: forall i o f r. (Monad f) => f (Channel i o f r) -> Channel i o f r
-  wrapEffect = ChanX
+-- | Feeds values to the channel. If the channel terminates before it
+-- | awaits all the values, the unused values will be discarded.
+feedAll' :: forall i o f r. (Monad f) => [i] -> Channel i o f r -> Channel i o f r
+feedAll' is = (<$>) snd <<< feedAll is
 
-  -- | Forcibly terminates a channel and returns a terminator.
-  terminate :: forall i o f r. (Monad f) => Channel i o f r -> Terminator f r
-  terminate (Yield _ _ q) = q
-  terminate (Await   _ q) = q
-  terminate (ChanX     x) = lift x >>= terminate
-  terminate (ChanZ     l) = defer1 \_ -> (terminate (force l))
-  terminate (Stop      r) = pure r
+-- | Wraps an effect into the channel.
+wrapEffect :: forall i o f r. (Monad f) => f (Channel i o f r) -> Channel i o f r
+wrapEffect = ChanX
 
-  -- | Terminates a channel and runs the terminator.
-  terminateRun :: forall i o f r. (Monad f) => Channel i o f r -> f (Maybe r)
-  terminateRun = terminate >>> runTerminator
+-- | Forcibly terminates a channel and returns a terminator.
+terminate :: forall i o f r. (Monad f) => Channel i o f r -> Terminator f r
+terminate (Yield _ _ q) = q
+terminate (Await   _ q) = q
+terminate (ChanX     x) = lift x >>= terminate
+terminate (ChanZ     l) = CL.defer \_ -> (terminate (force l))
+terminate (Stop      r) = pure r
 
-  -- | Replaces the value that the channel will produce if forcibly terminated.
-  -- | Preserves any effects associated with the old terminator.
-  (!:) :: forall i o f r. (Applicative f) => Channel i o f r -> Terminator f r -> Channel i o f r
-  (!:) c q2 = loop c
-    where
-      loop (Yield o c q1) = Yield o (loop c) (q1 *> q2)
-      loop (Await   f q1) = Await (loop <$> f) (q1 *> q2)
-      loop (ChanX      x) = ChanX (loop <$> x)
-      loop (ChanZ      z) = ChanZ (loop <$> z)
-      loop (Stop       r) = Stop r
+-- | Terminates a channel and runs the terminator.
+terminateRun :: forall i o f r. (Monad f) => Channel i o f r -> f (Maybe r)
+terminateRun = terminate >>> runTerminator
 
-  -- | Attaches the specified finalizer to the channel. The finalizer will be
-  -- | called when the channel is forcibly terminated or when it voluntarily 
-  -- | terminates (but just once).
-  finalizer :: forall i o f r x. (Monad f) => f x -> Channel i o f r -> Channel i o f r
-  finalizer x = loop
-    where
-      x' = TerX (TerP <$> x)
+-- | Replaces the value that the channel will produce if forcibly terminated.
+-- | Preserves any effects associated with the old terminator.
+(!:) :: forall i o f r. (Applicative f) => Channel i o f r -> Terminator f r -> Channel i o f r
+(!:) c q2 = loop c
+  where
+    loop (Yield o c q1) = Yield o (loop c) (q1 *> q2)
+    loop (Await   f q1) = Await (loop <$> f) (q1 *> q2)
+    loop (ChanX      x) = ChanX (loop <$> x)
+    loop (ChanZ      z) = ChanZ (loop <$> z)
+    loop (Stop       r) = Stop r
 
-      loop (Yield o c q) = Yield o (loop c) (x' *> q)
-      loop (Await   f q) = Await (loop <$> f) (x' *> q)
-      loop (ChanX     x) = ChanX (loop <$> x)
-      loop (ChanZ     z) = ChanZ (loop <$> z)
-      loop (Stop      r) = lift x *> Stop r
+-- | Attaches the specified finalizer to the channel. The finalizer will be
+-- | called when the channel is forcibly terminated or when it voluntarily
+-- | terminates (but just once).
+finalizer :: forall i o f r x. (Monad f) => f x -> Channel i o f r -> Channel i o f r
+finalizer x = loop
+  where
+    x' = TerX (TerP <$> x)
 
-  -- | Folds over the top-level structure of the channel to produce a value.
-  -- | Note that this currently destroys laziness (!).
-  foldChannel :: forall i o f r z. (Monad f) => 
-    (o -> Channel i o f r -> Terminator f r -> z) -> 
-    ((i -> Channel i o f r) -> Terminator f r -> z) -> 
-    (r -> z) -> 
-    Channel i o f r ->
-    f z
-  foldChannel yieldF awaitF stopF = loop
-    where loop (Yield o c q) = pure (yieldF o c q)
-          loop (Await   h q) = pure (awaitF h q)
-          loop (ChanX     x) = x >>= loop
-          loop (ChanZ     z) = loop (force z)
-          loop (Stop      r) = pure (stopF r)
+    loop (Yield o c q) = Yield o (loop c) (x' *> q)
+    loop (Await   f q) = Await (loop <$> f) (x' *> q)
+    loop (ChanX     x) = ChanX (loop <$> x)
+    loop (ChanZ     z) = ChanZ (loop <$> z)
+    loop (Stop      r) = lift x *> Stop r
 
-  stopUnit :: forall i o f. Channel i o f Unit
-  stopUnit = Stop unit
+-- | Folds over the top-level structure of the channel to produce a value.
+-- | Note that this currently destroys laziness (!).
+foldChannel :: forall i o f r z. (Monad f) =>
+  (o -> Channel i o f r -> Terminator f r -> z) ->
+  ((i -> Channel i o f r) -> Terminator f r -> z) ->
+  (r -> z) ->
+  Channel i o f r ->
+  f z
+foldChannel yieldF awaitF stopF = loop
+  where loop (Yield o c q) = pure (yieldF o c q)
+        loop (Await   h q) = pure (awaitF h q)
+        loop (ChanX     x) = x >>= loop
+        loop (ChanZ     z) = loop (force z)
+        loop (Stop      r) = pure (stopF r)
 
-  terminatorUnit :: forall f. Terminator f Unit
-  terminatorUnit = TerP unit
+stopUnit :: forall i o f. Channel i o f Unit
+stopUnit = Stop unit
 
-  -- Terminator instances
-  instance showTerminator :: (Functor f, Show (f String), Show a) => Show (Terminator f a) where 
-    show (TerP a) = "TerP (" ++ show a ++ ")"
-    show TerE     = "TerE"
-    show (TerX x) = "TerX (" ++ show (show <$> x) ++ ")"
-    show (TerZ z) = "TerZ (" ++ show z ++ ")"
+terminatorUnit :: forall f. Terminator f Unit
+terminatorUnit = TerP unit
 
-  instance lazy1Terminator :: Lazy1 (Terminator f) where
-    defer1 l = TerZ (defer l)
+-- Terminator instances
+instance showTerminator :: (Functor f, Show (f String), Show a) => Show (Terminator f a) where
+  show (TerP a) = "TerP (" ++ show a ++ ")"
+  show TerE     = "TerE"
+  show (TerX x) = "TerX (" ++ show (show <$> x) ++ ")"
+  show (TerZ z) = "TerZ (" ++ show z ++ ")"
 
-  instance functorTerminator :: (Functor f) => Functor (Terminator f) where 
-    (<$>) f (TerP a) = TerP (f a)
-    (<$>) f TerE     = TerE
-    (<$>) f (TerX x) = TerX ((<$>) f <$> x)
-    (<$>) f (TerZ z) = TerZ ((<$>) f <$> z)
+instance lazyTerminator :: CL.Lazy (Terminator f a) where
+  defer l = TerZ (defer l)
 
-  -- TODO: Implement apply and bind more efficiently!
-  instance applyTerminator :: (Applicative f) => Apply (Terminator f) where
-    (<*>) (TerP f) (TerP x) = TerP (f x)
-    (<*>) TerE            _ = TerE
-    (<*>) _            TerE = TerE
-    (<*>) (TerX f)        x = TerX (flip (<*>) x <$> f)
-    (<*>) (TerZ f)        x = TerZ (flip (<*>) x <$> f)
-    (<*>) f        (TerX x) = TerX ((<*>) f <$> x)
-    (<*>) f        (TerZ x) = TerZ ((<*>) f <$> x)
+instance functorTerminator :: (Functor f) => Functor (Terminator f) where
+  (<$>) f (TerP a) = TerP (f a)
+  (<$>) f TerE     = TerE
+  (<$>) f (TerX x) = TerX ((<$>) f <$> x)
+  (<$>) f (TerZ z) = TerZ ((<$>) f <$> z)
 
-  instance applicativeTerminator :: (Applicative f) => Applicative (Terminator f) where
-    pure a = TerP a
+-- TODO: Implement apply and bind more efficiently!
+instance applyTerminator :: (Applicative f) => Apply (Terminator f) where
+  (<*>) (TerP f) (TerP x) = TerP (f x)
+  (<*>) TerE            _ = TerE
+  (<*>) _            TerE = TerE
+  (<*>) (TerX f)        x = TerX (flip (<*>) x <$> f)
+  (<*>) (TerZ f)        x = TerZ (flip (<*>) x <$> f)
+  (<*>) f        (TerX x) = TerX ((<*>) f <$> x)
+  (<*>) f        (TerZ x) = TerZ ((<*>) f <$> x)
 
-  instance bindTerminator :: (Monad f) => Bind (Terminator f) where
-    (>>=) (TerP a) f = f a
-    (>>=) TerE     f = TerE
-    (>>=) (TerX x) f = TerX (flip (>>=) f <$> x)
-    (>>=) (TerZ z) f = defer1 \_ -> force z >>= f
+instance applicativeTerminator :: (Applicative f) => Applicative (Terminator f) where
+  pure a = TerP a
 
-  instance monadTerminator :: (Monad f) => Monad (Terminator f)
+instance bindTerminator :: (Monad f) => Bind (Terminator f) where
+  (>>=) (TerP a) f = f a
+  (>>=) TerE     f = TerE
+  (>>=) (TerX x) f = TerX (flip (>>=) f <$> x)
+  (>>=) (TerZ z) f = CL.defer \_ -> force z >>= f
 
-  instance monadTransTerminator :: MonadTrans Terminator where 
-    lift fa = TerX (TerP <$> fa)
+instance monadTerminator :: (Monad f) => Monad (Terminator f)
 
-  instance semigroupTerminator :: (Monad f, Semigroup a) => Semigroup (Terminator f a) where
-    (<>) x y = defer1 \_ -> TerX (maybe TerE TerP <$> ((<>) <$> runTerminator x <*> runTerminator y))
+instance monadTransTerminator :: MonadTrans Terminator where
+  lift fa = TerX (TerP <$> fa)
 
-  instance monoidTerminator :: (Monad f, Semigroup a) => Monoid (Terminator f a) where 
-    mempty = TerE
+instance semigroupTerminator :: (Monad f, Semigroup a) => Semigroup (Terminator f a) where
+  (<>) x y = CL.defer \_ -> TerX (maybe TerE TerP <$> ((<>) <$> runTerminator x <*> runTerminator y))
 
-  instance altTerminator :: (Functor f) => Alt (Terminator f) where 
-    (<|>) TerE y = y
-    (<|>) x TerE = x
-    (<|>) (TerX x) y = TerX (flip (<|>) y <$> x)
-    (<|>) (TerZ x) y = TerZ (flip (<|>) y <$> x)
-    (<|>) x (TerX y) = TerX (     (<|>) x <$> y)
-    (<|>) x (TerZ y) = TerZ (     (<|>) x <$> y)
-    (<|>) x y = x
+instance monoidTerminator :: (Monad f, Semigroup a) => Monoid (Terminator f a) where
+  mempty = TerE
 
-  instance plusTerminator :: (Functor f) => Plus (Terminator f) where
-    empty = TerE
+instance altTerminator :: (Functor f) => Alt (Terminator f) where
+  (<|>) TerE y = y
+  (<|>) x TerE = x
+  (<|>) (TerX x) y = TerX (flip (<|>) y <$> x)
+  (<|>) (TerZ x) y = TerZ (flip (<|>) y <$> x)
+  (<|>) x (TerX y) = TerX (     (<|>) x <$> y)
+  (<|>) x (TerZ y) = TerZ (     (<|>) x <$> y)
+  (<|>) x y = x
 
-  instance alternativeTerminator :: (Applicative f) => Alternative (Terminator f)
+instance plusTerminator :: (Functor f) => Plus (Terminator f) where
+  empty = TerE
 
-  instance monadPlusTerminator :: (Monad f) => Monad (Terminator f)
+instance alternativeTerminator :: (Applicative f) => Alternative (Terminator f)
 
-  -- Channel instances
-  instance lazy1Channel :: Lazy1 (Channel i o f) where
-    defer1 l = ChanZ (defer l)
+instance monadPlusTerminator :: (Monad f) => Monad (Terminator f)
 
-  instance functorChannel :: (Functor f) => Functor (Channel i o f) where
-    (<$>) f (Yield o c q) = Yield o (f <$> c) (f <$> q)
-    (<$>) f (Await   g q) = Await ((<$>) f <$> g) (f <$> q)
-    (<$>) f (ChanX     x) = ChanX ((<$>) f <$> x)
-    (<$>) f (ChanZ     z) = ChanZ ((<$>) f <$> z)
-    (<$>) f (Stop      r) = Stop (f r)
+-- Channel instances
+instance lazyChannel :: CL.Lazy (Channel i o f a) where
+  defer l = ChanZ (defer l)
 
-  instance semigroupChannel :: (Applicative f, Semigroup r) => Semigroup (Channel io io f r) where
-    (<>) (Yield o c q) w = Yield o (c <> w) q
-    (<>) (Await   f q) w = Await (flip (<>) w <$> f) q
-    (<>) (ChanX     x) w = ChanX (flip (<>) w <$> x)
-    (<>) (ChanZ     z) w = ChanZ (flip (<>) w <$> z)
-    (<>) (Stop      r) w = (<>) r <$> w
+instance functorChannel :: (Functor f) => Functor (Channel i o f) where
+  (<$>) f (Yield o c q) = Yield o (f <$> c) (f <$> q)
+  (<$>) f (Await   g q) = Await ((<$>) f <$> g) (f <$> q)
+  (<$>) f (ChanX     x) = ChanX ((<$>) f <$> x)
+  (<$>) f (ChanZ     z) = ChanZ ((<$>) f <$> z)
+  (<$>) f (Stop      r) = Stop (f r)
 
-  instance monoidChannel :: (Applicative f, Monoid r) => Monoid (Channel io io f r) where
-    mempty = Stop mempty 
+instance semigroupChannel :: (Applicative f, Semigroup r) => Semigroup (Channel io io f r) where
+  (<>) (Yield o c q) w = Yield o (c <> w) q
+  (<>) (Await   f q) w = Await (flip (<>) w <$> f) q
+  (<>) (ChanX     x) w = ChanX (flip (<>) w <$> x)
+  (<>) (ChanZ     z) w = ChanZ (flip (<>) w <$> z)
+  (<>) (Stop      r) w = (<>) r <$> w
 
-  instance applyChannel :: (Monad f) => Apply (Channel i o f) where
-    (<*>) (Yield o c q) w = Yield o (c <*> w) (q <*> terminate w)
-    (<*>) (Await   g q) w = Await (flip (<*>) w <$> g) (q <*> terminate w)
-    (<*>) (ChanX     x) w = ChanX (flip (<*>) w <$> x)
-    (<*>) (ChanZ     z) w = ChanZ (flip (<*>) w <$> z)
-    (<*>) v @ (Stop f) (Yield o c q) = Yield o (v <*> c) (pure f <*> q)
-    (<*>) v @ (Stop f) (Await  g q)  = Await ((<*>) v <$> g) (pure f <*> q)
-    (<*>) v @ (Stop f) (ChanX    x)  = ChanX ((<*>) v <$> x)
-    (<*>) v @ (Stop f) (ChanZ    z)  = ChanZ ((<*>) v <$> z)
-    (<*>) v @ (Stop f) (Stop     x)  = Stop (f x)
+instance monoidChannel :: (Applicative f, Monoid r) => Monoid (Channel io io f r) where
+  mempty = Stop mempty
 
-  instance applicativeChannel :: (Monad f) => Applicative (Channel i o f) where
-    pure r = Stop r
+instance applyChannel :: (Monad f) => Apply (Channel i o f) where
+  (<*>) (Yield o c q) w = Yield o (c <*> w) (q <*> terminate w)
+  (<*>) (Await   g q) w = Await (flip (<*>) w <$> g) (q <*> terminate w)
+  (<*>) (ChanX     x) w = ChanX (flip (<*>) w <$> x)
+  (<*>) (ChanZ     z) w = ChanZ (flip (<*>) w <$> z)
+  (<*>) v @ (Stop f) (Yield o c q) = Yield o (v <*> c) (pure f <*> q)
+  (<*>) v @ (Stop f) (Await  g q)  = Await ((<*>) v <$> g) (pure f <*> q)
+  (<*>) v @ (Stop f) (ChanX    x)  = ChanX ((<*>) v <$> x)
+  (<*>) v @ (Stop f) (ChanZ    z)  = ChanZ ((<*>) v <$> z)
+  (<*>) v @ (Stop f) (Stop     x)  = Stop (f x)
 
-  instance bindChannel :: (Monad f) => Bind (Channel i o f) where
-    (>>=) (Yield o c q) f = Yield o (c >>= f) (q >>= (terminate <$> f))
-    (>>=) (Await   g q) f = Await (flip (>>=) f <$> g) (q >>= (terminate <$> f))
-    (>>=) (ChanX     x) f = ChanX (flip (>>=) f <$> x)
-    (>>=) (ChanZ     z) f = ChanZ (flip (>>=) f <$> z)
-    (>>=) (Stop      r) f = f r
+instance applicativeChannel :: (Monad f) => Applicative (Channel i o f) where
+  pure r = Stop r
 
-  instance monadChannel :: (Monad f) => Monad (Channel i o f)
+instance bindChannel :: (Monad f) => Bind (Channel i o f) where
+  (>>=) (Yield o c q) f = Yield o (c >>= f) (q >>= (terminate <$> f))
+  (>>=) (Await   g q) f = Await (flip (>>=) f <$> g) (q >>= (terminate <$> f))
+  (>>=) (ChanX     x) f = ChanX (flip (>>=) f <$> x)
+  (>>=) (ChanZ     z) f = ChanZ (flip (>>=) f <$> z)
+  (>>=) (Stop      r) f = f r
 
-  instance monadTransChannel :: MonadTrans (Channel i o) where 
-    lift fr = wrapEffect (pure <$> fr)
+instance monadChannel :: (Monad f) => Monad (Channel i o f)
+
+instance monadTransChannel :: MonadTrans (Channel i o) where
+  lift fr = wrapEffect (pure <$> fr)

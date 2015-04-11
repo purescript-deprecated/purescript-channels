@@ -159,8 +159,8 @@ data Z :: *
 data Terminator f a
 ```
 
-A channel terminator, which may terminate with a value, or refuse to 
-terminate. Termination can be accompanied by effects, including 
+A channel terminator, which may terminate with a value, or refuse to
+terminate. Termination can be accompanied by effects, including
 laziness or `f` effects.
 
 #### `Channel`
@@ -171,7 +171,7 @@ data Channel i o f r
 
 An event-driven channel of communication with a well-defined lifecycle.
 
-Channels may yield output values, await input values, execute effects, 
+Channels may yield output values, await input values, execute effects,
 defer computation of a channel, and voluntarily terminate with a final
 result value `r`.
 
@@ -278,7 +278,7 @@ Using the specified terminator, yields an effectful value.
 feed :: forall i o f r. (Monad f) => i -> Channel i o f r -> Channel i o f (Tuple [i] r)
 ```
 
-Feeds a value to the channel. If the channel terminates before it 
+Feeds a value to the channel. If the channel terminates before it
 awaits the value, the value will be monadically returned.
 
 #### `feed'`
@@ -287,7 +287,7 @@ awaits the value, the value will be monadically returned.
 feed' :: forall i o f r. (Monad f) => i -> Channel i o f r -> Channel i o f r
 ```
 
-Feeds a value to the channel. If the channel terminates before it 
+Feeds a value to the channel. If the channel terminates before it
 awaits the value, the value will be discarded.
 
 #### `feedAll`
@@ -296,7 +296,7 @@ awaits the value, the value will be discarded.
 feedAll :: forall i o f r. (Monad f) => [i] -> Channel i o f r -> Channel i o f (Tuple [i] r)
 ```
 
-Feeds values to the channel. If the channel terminates before it 
+Feeds values to the channel. If the channel terminates before it
 awaits all the values, the unused values will be monadically returned.
 
 #### `feedAll'`
@@ -305,7 +305,7 @@ awaits all the values, the unused values will be monadically returned.
 feedAll' :: forall i o f r. (Monad f) => [i] -> Channel i o f r -> Channel i o f r
 ```
 
-Feeds values to the channel. If the channel terminates before it 
+Feeds values to the channel. If the channel terminates before it
 awaits all the values, the unused values will be discarded.
 
 #### `wrapEffect`
@@ -348,7 +348,7 @@ finalizer :: forall i o f r x. (Monad f) => f x -> Channel i o f r -> Channel i 
 ```
 
 Attaches the specified finalizer to the channel. The finalizer will be
-called when the channel is forcibly terminated or when it voluntarily 
+called when the channel is forcibly terminated or when it voluntarily
 terminates (but just once).
 
 #### `foldChannel`
@@ -366,10 +366,10 @@ Note that this currently destroys laziness (!).
 instance showTerminator :: (Functor f, Show (f String), Show a) => Show (Terminator f a)
 ```
 
-#### `lazy1Terminator`
+#### `lazyTerminator`
 
 ``` purescript
-instance lazy1Terminator :: Lazy1 (Terminator f)
+instance lazyTerminator :: CL.Lazy (Terminator f a)
 ```
 
 
@@ -456,10 +456,10 @@ instance monadPlusTerminator :: (Monad f) => Monad (Terminator f)
 ```
 
 
-#### `lazy1Channel`
+#### `lazyChannel`
 
 ``` purescript
-instance lazy1Channel :: Lazy1 (Channel i o f)
+instance lazyChannel :: CL.Lazy (Channel i o f a)
 ```
 
 #### `functorChannel`
@@ -528,7 +528,7 @@ newtype Stream f r i o
   = Stream (Channel i o f r)
 ```
 
-A newtype for Channel so we can define semigroupoid, category, 
+A newtype for Channel so we can define semigroupoid, category,
 and profunctor.
 
 #### `unStream`
