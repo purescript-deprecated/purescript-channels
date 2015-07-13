@@ -1,5 +1,6 @@
 # purescript-channels
 
+[![Build Status](https://travis-ci.org/purescript-contrib/purescript-channels.svg?branch=master)](https://travis-ci.org/purescript-contrib/purescript-channels)
 [![Maintainer](https://img.shields.io/badge/maintainer-jdegoes-lightgrey.svg)](http://github.com/jdegoes)
 
 Event-driven bidirectional channels
