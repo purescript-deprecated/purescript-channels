@@ -12,8 +12,6 @@ To install:
 
 ## Module Documentation
 
-[Module Documentation](docs/)
-
 - [Channels.Bichannel](docs/Channels/Bichannel.md)
 - [Channels.Combinators](docs/Channels/Combinators.md)
 - [Channels.Core](docs/Channels/Core.md)
