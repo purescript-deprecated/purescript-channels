@@ -3,11 +3,13 @@
   "description": "Event-driven, bidirectional channels in PureScript",
   "license": "MIT",
   "repository": "git@github.com:purescript-contrib/purescript-channels.git",
+  "private": true,
+  "scripts": {
+    "postinstall": "pulp dep install",
+    "build": "pulp build && rimraf docs && pulp docs"
+  },
   "devDependencies": {
-    "gulp":             "^3.8.6",
-    "gulp-purescript":  "0.1.2",
-    "gulp-run":         "^1.6.4",
-    "run-sequence":     "^0.3.6",
-    "gulp-jsvalidate":  "~1.0.1"
+    "pulp": "^4.0.1",
+    "rimraf": "^2.4.1"
   }
 }
