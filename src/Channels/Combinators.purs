@@ -1,4 +1,7 @@
 module Channels.Combinators where
+
+  import Prelude hiding (compose)
+
   import Data.Foldable
   import Control.Apply
 
@@ -7,9 +10,9 @@ module Channels.Combinators where
 
   -- | Yields a bunch of values.
   yieldAll :: forall i o f c. (Monad f, Foldable c) => c o -> Channel i o f Unit
-  yieldAll co = loop (foldMap (\a -> [a]) co)
-    where loop [] = return unit
-          loop a @ (x : xs) = yield x *> loop xs
+  yieldAll = foldl (\next x -> do yield x
+                                  next) 
+                   (pure unit)
 
   -- | Lifts a pure function to a channel.
   moore :: forall i o f. (Monad f) => (i -> o) -> Channel i o f Unit

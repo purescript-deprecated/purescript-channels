@@ -3,11 +3,12 @@ module Channels.Stream
   , unStream
   ) where
 
+  import Prelude hiding (compose)
+
   import Data.Monoid(Monoid, mempty) 
   import Data.Profunctor
 
   import Control.Apply
-  import Control.Lazy(defer1)
 
   import Channels.Core
 
@@ -19,7 +20,7 @@ module Channels.Stream
   unStream (Stream c) = c
 
   instance semigroupoidStream :: (Monad f, Semigroup r) => Semigroupoid (Stream f r) where
-    (<<<) (Stream c1) (Stream c2) = Stream (compose c1 c2)
+    compose (Stream c1) (Stream c2) = Stream (compose c1 c2)
 
   instance categoryStream :: (Monad f, Semigroup r) => Category (Stream f r) where
     id = Stream (loopForever (await >>= yield))
