@@ -14,6 +14,8 @@ module Channels.Bichannel
   , yieldUp
   ) where
 
+  import Prelude hiding (compose)
+
   import Data.Either(Either(..), either)
   import Data.Tuple(Tuple(..))
   import Data.Lazy(Lazy(..), force)
@@ -21,11 +23,13 @@ module Channels.Bichannel
   import Data.Monoid
   import Data.Profunctor(Profunctor, dimap)
   import Control.Apply((*>))
-  import Control.Lazy(defer1)
+  import Control.Lazy(defer)
   import Control.Monad.Trans(lift)
 
   import Channels.Core
   import Channels.Stream(Stream(..), unStream)
+  
+  import Unsafe.Coerce (unsafeCoerce)
 
   -- | A bidirectional channel, which has both upstream and downstream channels
   -- | of communication.
@@ -90,7 +94,7 @@ module Channels.Bichannel
                                   let yieldF2 e2 c2 q2 = either (\a'' -> yield (Left a'') !: void q2 *>
                                                                         (yield (Left a') *> c1) `stack` c2)
                                                                 (\b'  -> feed' (Right b') c1 `stack` feed' (Left a') c2) e2
-                                      awaitF2    f2  _ = defer1 \_ -> c1 `stack` f2 (Left a')
+                                      awaitF2    f2  _ = defer \_ -> c1 `stack` f2 (Left a')
                                       stopF2        r2 = lift (flip Tuple (Just r2) <$> runTerminator q1)
                                   in wrapEffect (foldChannel yieldF2 awaitF2 stopF2 c2))
                                  (\b'' -> yield (Right b'') !: void q1 *> c1 `stack` c2) e1
@@ -98,7 +102,7 @@ module Channels.Bichannel
       awaitF1    f1 q1  = let c1 = await >>= f1 -- q1
 
                               yieldF2 e2 c2 q2 = either (\a'' -> yield (Left a'') !: void q2 *> c1 `stack` c2)
-                                                        (\b'  -> defer1 \_ -> f1 (Right b') `stack` c2) e2
+                                                        (\b'  -> defer \_ -> f1 (Right b') `stack` c2) e2
                               awaitF2    f2 q2 = await >>= either (\a -> f1 (Left a) `stack` c2)
                                                                   (\b -> c1 `stack` f2 (Right b))
                               stopF2        r2 = lift (flip Tuple (Just r2) <$> runTerminator q1)
@@ -113,7 +117,3 @@ module Channels.Bichannel
   -- | Runs a biworkflow.
   runBiworkflow :: forall f r. (Monad f) => Biworkflow f r -> f r
   runBiworkflow = toWorkflow >>> runWorkflow
-
-  -- This function will never be invoked because sinks are prevented by their
-  -- type signature from emitting values and sources are prevented from using them.
-  foreign import unsafeCoerce "function unsafeCoerce(a){return a;}" :: forall a b. a -> b
