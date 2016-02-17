@@ -1,18 +1,17 @@
-module Channels.Stream 
+module Channels.Stream
   ( Stream(..)
   , unStream
   ) where
 
-  import Prelude hiding (compose)
+  import Prelude (class Monad, class Category, class Semigroup, class Semigroupoid, pure, (<$>), (>>>), (>>=), void)
 
-  import Data.Monoid(Monoid, mempty) 
-  import Data.Profunctor
+  import Data.Profunctor (class Profunctor)
 
-  import Control.Apply
+  import Control.Apply ((*>))
 
-  import Channels.Core
+  import Channels.Core (Channel, foldChannel, wrapEffect, await, yield, (!:), loopForever, compose)
 
-  -- | A newtype for Channel so we can define semigroupoid, category, 
+  -- | A newtype for Channel so we can define semigroupoid, category,
   -- | and profunctor.
   newtype Stream f r i o = Stream (Channel i o f r)
 
@@ -30,4 +29,3 @@ module Channels.Stream
       where yieldF o c q = (yield (g o) !: void q) *> loop c
             awaitF   h q = await >>= (f >>> (loop <$> h))
             loop       c = wrapEffect (foldChannel yieldF awaitF pure c)
-  

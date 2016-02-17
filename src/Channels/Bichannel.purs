@@ -14,21 +14,19 @@ module Channels.Bichannel
   , yieldUp
   ) where
 
-  import Prelude hiding (compose)
+  import Prelude (class Monad, class Applicative, Unit, (>>>), (<$>), flip, (>>=), void, pure, return, (<<<))
 
   import Data.Either(Either(..), either)
   import Data.Tuple(Tuple(..))
-  import Data.Lazy(Lazy(..), force)
   import Data.Maybe(Maybe(..))
-  import Data.Monoid
-  import Data.Profunctor(Profunctor, dimap)
+  import Data.Profunctor(dimap)
   import Control.Apply((*>))
   import Control.Lazy(defer)
   import Control.Monad.Trans(lift)
 
-  import Channels.Core
+  import Channels.Core (Workflow, Channel, Z, runWorkflow, foldChannel, wrapEffect, terminateRun, runTerminator, await, yield, (!:), feed')
   import Channels.Stream(Stream(..), unStream)
-  
+
   import Unsafe.Coerce (unsafeCoerce)
 
   -- | A bidirectional channel, which has both upstream and downstream channels
